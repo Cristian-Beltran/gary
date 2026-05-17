@@ -1,0 +1,24 @@
+import { Global, Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import config from 'src/context/shared/config';
+import { ConfigType } from '@nestjs/config';
+import { MigrationController } from './database.controller';
+@Global()
+@Module({
+  imports: [
+    TypeOrmModule.forRootAsync({
+      inject: [config.KEY],
+      useFactory: (configService: ConfigType<typeof config>) => {
+        const { path } = configService.database;
+        return {
+          type: 'sqlite' as const,
+          database: path,
+          autoLoadEntities: true,
+          synchronize: true,
+        };
+      },
+    }),
+  ],
+  controllers: [MigrationController],
+})
+export class DatabaseModule {}

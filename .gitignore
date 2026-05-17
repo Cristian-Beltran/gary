@@ -1,0 +1,41 @@
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node dependencies/builds
+**/node_modules/
+**/dist/
+**/build/
+**/.turbo/
+**/.cache/
+
+# Coverage
+**/coverage/
+**/.nyc_output/
+
+# Local DB/data
+test-pulmonar-gareth-backend/data/local.db
+test-pulmonar-gareth-backend/data/*.db
+test-pulmonar-gareth-backend/data/*.sqlite
+test-pulmonar-gareth-backend/data/*.sqlite3
+
+# Env files (if created locally)
+**/.env
+**/.env.*
+
+# Arduino build artifacts
+*.hex
+*.bin
+*.elf
+*.map
