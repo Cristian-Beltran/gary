@@ -49,7 +49,7 @@ export function SessionsTable({ sessions }: Props) {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-4 text-sm">
+              <div className="grid gap-3 sm:grid-cols-5 text-sm">
                 <Stat label="Duracion" value={duration == null ? "En curso" : `${duration.toFixed(1)} min`} />
                 <Stat
                   label="Pulso prom"
@@ -63,6 +63,10 @@ export function SessionsTable({ sessions }: Props) {
                   label="Presion prom"
                   value={`${avg(records.map((r) => r.lungCapacity)).toFixed(2)} kPa`}
                 />
+                <Stat
+                  label="Flujo prom"
+                  value={`${avg(records.map((r) => r.airFlow)).toFixed(1)} SLM`}
+                />
               </div>
 
               <div className="overflow-auto rounded-md border">
@@ -70,11 +74,12 @@ export function SessionsTable({ sessions }: Props) {
                   <thead className="bg-muted/40">
                     <tr>
                       <th className="text-left p-2">Hora</th>
-                      <th className="text-left p-2">Pulso</th>
-                      <th className="text-left p-2">SpO2</th>
-                      <th className="text-left p-2">Presion respiratoria</th>
-                    </tr>
-                  </thead>
+                        <th className="text-left p-2">Pulso</th>
+                        <th className="text-left p-2">SpO2</th>
+                        <th className="text-left p-2">Presion respiratoria</th>
+                        <th className="text-left p-2">Flujo de aire</th>
+                      </tr>
+                    </thead>
                   <tbody>
                     {records.slice(-15).map((r) => (
                       <tr key={r.id} className="border-t">
@@ -82,6 +87,7 @@ export function SessionsTable({ sessions }: Props) {
                         <td className="p-2">{r.pulse}</td>
                         <td className="p-2">{r.oxygenSaturation}</td>
                         <td className="p-2">{r.lungCapacity.toFixed(2)} kPa</td>
+                        <td className="p-2">{r.airFlow.toFixed(1)} SLM</td>
                       </tr>
                     ))}
                   </tbody>

@@ -19,6 +19,9 @@ export class SessionData {
   @Column('float')
   lungCapacity: number; // voltajes +/- convertidos a valor clínico
 
+  @Column('float', { default: 0 })
+  airFlow: number;
+
   @Column('int')
   pulse: number;
 

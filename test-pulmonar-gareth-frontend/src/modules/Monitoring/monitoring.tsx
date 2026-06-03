@@ -35,6 +35,7 @@ type RealtimeRow = {
   pulse: number;
   oxygenSaturation: number;
   lungCapacity: number;
+  airFlow: number;
   state?: string;
 };
 
@@ -63,16 +64,19 @@ function parseGaryPayload(raw: string): RealtimeRow | null {
     const lungCapacity = Number(
       obj.lungCapacity ?? obj.lungPressureKpa ?? obj.pressure,
     );
+    const airFlow = Number(obj.airFlow ?? obj.flowRate ?? obj.flow ?? obj.airflow);
 
     if (
       Number.isFinite(pulse) &&
       Number.isFinite(oxygenSaturation) &&
-      Number.isFinite(lungCapacity)
+      Number.isFinite(lungCapacity) &&
+      Number.isFinite(airFlow)
     ) {
       return {
         pulse,
         oxygenSaturation,
         lungCapacity,
+        airFlow,
         state: typeof obj.state === "string" ? obj.state : undefined,
         timestamp:
           typeof obj.timestamp === "string"
@@ -269,6 +273,7 @@ export default function MonitoringPage() {
         pulse: row.pulse,
         spo2: row.oxygenSaturation,
         pressure: row.lungCapacity,
+        flow: row.airFlow,
       })),
     [realtime],
   );
@@ -360,7 +365,7 @@ export default function MonitoringPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <Metric title="Pulso" value={last?.pulse} unit="bpm" icon={<Activity className="h-4 w-4" />} />
             <Metric title="SpO2" value={last?.oxygenSaturation} unit="%" icon={<Droplets className="h-4 w-4" />} />
             <Metric
@@ -369,6 +374,7 @@ export default function MonitoringPage() {
               unit="kPa"
               icon={<Wind className="h-4 w-4" />}
             />
+            <Metric title="Flujo de aire" value={last?.airFlow} unit="SLM" icon={<Wind className="h-4 w-4" />} />
           </div>
         </CardContent>
       </Card>
@@ -387,6 +393,7 @@ export default function MonitoringPage() {
             data={chartData}
             color="#059669"
           />
+          <GraphCard title="Flujo de aire (SLM)" dataKey="flow" data={chartData} color="#7c3aed" />
         </CardContent>
       </Card>
 

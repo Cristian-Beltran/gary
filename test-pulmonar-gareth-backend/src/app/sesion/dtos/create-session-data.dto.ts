@@ -5,6 +5,9 @@ export class CreateSessionDataDto {
   @IsNumber()
   lungCapacity: number; // valor clínico ya transformado
 
+  @IsNumber()
+  airFlow: number;
+
   @IsInt()
   pulse: number;
 

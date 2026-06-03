@@ -6,6 +6,7 @@ import { GaryDeviceStatus, GaryTelemetry } from '../models/telemetry.model';
 const MQTT_URL = 'mqtt://broker.hivemq.com:1883';
 const MQTT_TOPIC = 'gary/device/telemetry';
 const MQTT_STATUS_TOPIC = 'gary/device/status';
+const MQTT_CONTROL_TOPIC = 'gary/device/control';
 const SAVE_INTERVAL_MS = 60_000;
 
 @Injectable()
@@ -17,6 +18,8 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
     online: false,
     mqttConnected: false,
     wifiConnected: false,
+    monitoringEnabled: false,
+    emergencyActive: false,
     timestamp: new Date().toISOString(),
   };
   private saveTimer: NodeJS.Timeout | null = null;
@@ -46,6 +49,7 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
         }
         this.logger.log(`Suscrito a ${MQTT_STATUS_TOPIC}`);
       });
+      void this.syncMonitoringControl();
     });
 
     this.client.on('message', (topic, payload) => {
@@ -90,6 +94,31 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
     return this.latestDeviceStatus;
   }
 
+  async publishMonitoringControl(monitoringEnabled: boolean) {
+    if (!this.client?.connected) {
+      this.logger.warn('No se pudo publicar control MQTT: broker desconectado');
+      return false;
+    }
+
+    const payload = JSON.stringify({ monitoringEnabled });
+    return await new Promise<boolean>((resolve) => {
+      this.client?.publish(MQTT_CONTROL_TOPIC, payload, { qos: 1, retain: true }, (err) => {
+        if (err) {
+          this.logger.error(`Error publicando ${MQTT_CONTROL_TOPIC}: ${err.message}`);
+          resolve(false);
+          return;
+        }
+
+        this.latestDeviceStatus = {
+          ...this.latestDeviceStatus,
+          monitoringEnabled,
+          timestamp: new Date().toISOString(),
+        };
+        resolve(true);
+      });
+    });
+  }
+
   private parseTelemetry(raw: string): GaryTelemetry | null {
     const message = raw.trim();
     if (!message) {
@@ -106,16 +135,19 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
         const lungCapacity = Number(
           obj.lungCapacity ?? obj.lungPressureKpa ?? obj.pressure,
         );
+        const airFlow = Number(obj.airFlow ?? obj.flowRate ?? obj.flow ?? obj.airflow);
 
         if (
           Number.isFinite(pulse) &&
           Number.isFinite(oxygenSaturation) &&
-          Number.isFinite(lungCapacity)
+          Number.isFinite(lungCapacity) &&
+          Number.isFinite(airFlow)
         ) {
           return {
             pulse,
             oxygenSaturation,
             lungCapacity,
+            airFlow,
             state: typeof obj.state === 'string' ? obj.state : undefined,
             timestamp:
               typeof obj.timestamp === 'string'
@@ -146,6 +178,7 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
         pulse: Math.round(this.latestTelemetry.pulse),
         oxygenSaturation: Math.round(this.latestTelemetry.oxygenSaturation),
         lungCapacity: this.latestTelemetry.lungCapacity,
+        airFlow: this.latestTelemetry.airFlow,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
@@ -164,12 +197,16 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
       const online = Boolean(obj.online ?? obj.mqttConnected);
       const mqttConnected = Boolean(obj.mqttConnected ?? obj.online);
       const wifiConnected = Boolean(obj.wifiConnected ?? true);
+      const monitoringEnabled = Boolean(obj.monitoringEnabled ?? false);
+      const emergencyActive = Boolean(obj.emergencyActive ?? false);
       const rssi = Number(obj.rssi);
 
       return {
         online,
         mqttConnected,
         wifiConnected,
+        monitoringEnabled,
+        emergencyActive,
         ip: typeof obj.ip === 'string' ? obj.ip : undefined,
         rssi: Number.isFinite(rssi) ? rssi : undefined,
         timestamp:
@@ -180,5 +217,10 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return null;
     }
+  }
+
+  private async syncMonitoringControl() {
+    const activeSession = await this.sessionService.getActiveSession();
+    await this.publishMonitoringControl(Boolean(activeSession));
   }
 }

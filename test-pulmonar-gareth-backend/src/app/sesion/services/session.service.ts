@@ -58,6 +58,7 @@ export class SessionService {
     const record = this.dataRepo.create({
       session,
       lungCapacity: dto.lungCapacity,
+      airFlow: dto.airFlow,
       pulse: dto.pulse,
       oxygenSaturation: dto.oxygenSaturation,
     });

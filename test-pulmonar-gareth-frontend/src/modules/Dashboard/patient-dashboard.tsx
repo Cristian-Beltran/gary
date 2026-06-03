@@ -44,6 +44,7 @@ function sessionAverages(session: Session) {
     pulse: avg(recs.map((r) => r.pulse)),
     spo2: avg(recs.map((r) => r.oxygenSaturation)),
     pressure: avg(recs.map((r) => r.lungCapacity)),
+    flow: avg(recs.map((r) => r.airFlow)),
   };
 }
 
@@ -137,6 +138,7 @@ export function PatientDashboard({ user }: Props) {
           spo2: Number(m.spo2.toFixed(1)),
           pulse: Number(m.pulse.toFixed(1)),
           pressure: Number(m.pressure.toFixed(2)),
+          flow: Number(m.flow.toFixed(1)),
         };
       });
   }, [filteredSessions]);
@@ -206,10 +208,11 @@ export function PatientDashboard({ user }: Props) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-6">
         <Kpi title="Pulso prom." value={latestAvg ? `${latestAvg.pulse.toFixed(0)} bpm` : "-"} icon={<Heart className="h-4 w-4" />} />
         <Kpi title="SpO2 prom." value={latestAvg ? `${latestAvg.spo2.toFixed(0)} %` : "-"} icon={<Droplets className="h-4 w-4" />} />
         <Kpi title="Presion prom." value={latestAvg ? `${latestAvg.pressure.toFixed(2)} kPa` : "-"} icon={<Wind className="h-4 w-4" />} />
+        <Kpi title="Flujo prom." value={latestAvg ? `${latestAvg.flow.toFixed(1)} SLM` : "-"} icon={<Wind className="h-4 w-4" />} />
         <Kpi
           title="Tendencia"
           value={globalTrend === "mejorando" ? "Mejorando" : globalTrend === "revisar" ? "Revisar" : "Estable"}
@@ -252,6 +255,7 @@ export function PatientDashboard({ user }: Props) {
                 <Line dataKey="spo2" stroke="#2563eb" strokeWidth={2.5} dot={false} />
                 <Line dataKey="pulse" stroke="#ef4444" strokeWidth={2.5} dot={false} />
                 <Line dataKey="pressure" stroke="#059669" strokeWidth={2.5} dot={false} />
+                <Line dataKey="flow" stroke="#7c3aed" strokeWidth={2.5} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -280,6 +284,7 @@ export function PatientDashboard({ user }: Props) {
                     <div>SpO2: {m.spo2.toFixed(0)}%</div>
                     <div>Pulso: {m.pulse.toFixed(0)} bpm</div>
                     <div>Presion: {m.pressure.toFixed(2)} kPa</div>
+                    <div>Flujo: {m.flow.toFixed(1)} SLM</div>
                   </div>
                 </div>
               );

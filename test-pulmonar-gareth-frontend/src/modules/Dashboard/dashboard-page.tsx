@@ -20,6 +20,7 @@ type LivePoint = {
   pulse: number;
   spo2: number;
   pressure: number;
+  flow: number;
 };
 
 function fmtTime(iso?: string) {
@@ -88,6 +89,7 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
               pulse: latest.pulse,
               spo2: latest.oxygenSaturation,
               pressure: latest.lungCapacity,
+              flow: latest.airFlow,
             },
           ].slice(-60);
         });
@@ -189,12 +191,18 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
           <Badge variant={deviceStatus?.mqttConnected ? "default" : "outline"}>
             MQTT: {deviceStatus?.mqttConnected ? "OK" : "OFF"}
           </Badge>
+          <Badge variant={deviceStatus?.monitoringEnabled ? "default" : "outline"}>
+            Monitor: {deviceStatus?.monitoringEnabled ? "ON" : "OFF"}
+          </Badge>
+          <Badge variant={deviceStatus?.emergencyActive ? "destructive" : "outline"}>
+            Alerta: {deviceStatus?.emergencyActive ? "SI" : "NO"}
+          </Badge>
           <Badge variant="outline">IP: {deviceStatus?.ip ?? "-"}</Badge>
           <Badge variant="outline">RSSI: {deviceStatus?.rssi ?? "-"}</Badge>
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6 lg:grid-cols-4">
         <MetricCard title="Pulso" value={latestTelemetry?.pulse} unit="bpm" icon={<Heart className="h-4 w-4" />} />
         <MetricCard title="SpO2" value={latestTelemetry?.oxygenSaturation} unit="%" icon={<Droplets className="h-4 w-4" />} />
         <MetricCard
@@ -203,6 +211,7 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
           unit="kPa"
           icon={<Wind className="h-4 w-4" />}
         />
+        <MetricCard title="Flujo de aire" value={latestTelemetry?.airFlow} unit="SLM" icon={<Wind className="h-4 w-4" />} />
       </div>
 
       <Card>
@@ -214,6 +223,7 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
           <MiniLine data={live} dataKey="pulse" color="#ef4444" title="Pulso" />
           <MiniLine data={live} dataKey="spo2" color="#2563eb" title="SpO2" />
           <MiniLine data={live} dataKey="pressure" color="#059669" title="Presion respiratoria" />
+          <MiniLine data={live} dataKey="flow" color="#7c3aed" title="Flujo de aire" />
         </CardContent>
       </Card>
 
@@ -280,7 +290,7 @@ function MiniLine({
   title,
 }: {
   data: LivePoint[];
-  dataKey: "pulse" | "spo2" | "pressure";
+  dataKey: "pulse" | "spo2" | "pressure" | "flow";
   color: string;
   title: string;
 }) {

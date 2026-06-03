@@ -9,12 +9,13 @@
 #include "spo2_algorithm.h"
 
 // ESP32 NodeMCU 40 pines
-constexpr uint8_t I2C_SDA_PIN = 32;
-constexpr uint8_t I2C_SCL_PIN = 33;
+constexpr uint8_t I2C_SDA_PIN = 21;
+constexpr uint8_t I2C_SCL_PIN = 22;
 constexpr uint8_t VIBRATOR_PIN = 26;
-constexpr uint8_t RELAY_RED_PIN = 25;
-constexpr uint8_t RELAY_GREEN_PIN = 27;
+constexpr uint8_t RELAY_RED_PIN = 18;
+constexpr uint8_t RELAY_GREEN_PIN = 19;
 constexpr uint8_t LUNG_PRESSURE_PIN = 35;  // ADC solo entrada
+constexpr uint8_t AIR_FLOW_PIN = 34;       // ADC solo entrada
 
 // OLED 0.91" I2C
 constexpr uint8_t OLED_ADDRESS = 0x3C;  // 0x78 en 8 bits equivale a 0x3C en 7 bits
@@ -63,13 +64,30 @@ constexpr float SAMPLE_START_PRESSURE_KPA = 0.35f;
 constexpr float SAMPLE_END_PRESSURE_KPA = 0.18f;
 constexpr float PRESSURE_BASELINE_SMOOTHING = 0.08f;
 
+// Parametros del SEN0360 / F1031V
+constexpr float AIR_FLOW_SENSOR_RANGE_SLM = 150.0f;
+constexpr float AIR_FLOW_SENSOR_ZERO_V = 0.5f;
+constexpr float AIR_FLOW_SENSOR_FULL_SCALE_V = 4.5f;
+constexpr float AIR_FLOW_SENSOR_OUTPUT_DIVIDER = 2.0f;
+constexpr float AIR_FLOW_SMOOTHING = 0.20f;
+
+// Umbrales de emergencia local
+constexpr float EMERGENCY_HEART_RATE_LOW_BPM = 45.0f;
+constexpr float EMERGENCY_HEART_RATE_HIGH_BPM = 150.0f;
+constexpr int32_t EMERGENCY_SPO2_LOW = 90;
+constexpr float EMERGENCY_PRESSURE_HIGH_KPA = 4.5f;
+constexpr float EMERGENCY_AIR_FLOW_HIGH_SLM = 140.0f;
+
 // WiFi + MQTT (configuracion local)
+//const char* WIFI_SSID = "Estudiantes";
+//const char* WIFI_PASSWORD = "EstWifi.0224";
 const char* WIFI_SSID = "Cordova hogar ext";
 const char* WIFI_PASSWORD = "4ndiNicol3";
 const char* MQTT_BROKER = "broker.hivemq.com";
 const uint16_t MQTT_PORT = 1883;
 const char* MQTT_TOPIC_TELEMETRY = "gary/device/telemetry";
 const char* MQTT_TOPIC_STATUS = "gary/device/status";
+const char* MQTT_TOPIC_CONTROL = "gary/device/control";
 
 enum BreathingState : uint8_t {
   STATE_WAIT_FINGER = 0,
@@ -91,6 +109,8 @@ bool validSpO2 = false;
 float lungPressureRawKpa = 0.0f;
 float lungPressureKpa = 0.0f;
 float lungPressureBaselineKpa = 0.0f;
+float airFlowRawSlm = 0.0f;
+float airFlowSlm = 0.0f;
 bool pressureBaselineReady = false;
 uint32_t lastIrValue = 0;
 bool fingerDetected = false;
@@ -98,6 +118,8 @@ bool max30102Available = false;
 bool displayAvailable = false;
 int32_t max30102SamplesStored = 0;
 int32_t max30102NewSamples = 0;
+bool monitoringEnabled = false;
+bool emergencyActive = false;
 
 BreathingState breathingState = STATE_WAIT_FINGER;
 float samplePeakPressureKpa = 0.0f;
@@ -118,18 +140,23 @@ unsigned long lastMqttStatusMs = 0;
 
 void initializeMax30102();
 void initializePressureSensor();
+void initializeAirFlowSensor();
 void initializeDisplay();
 void updatePressure();
+void updateAirFlow();
 void updateMax30102();
 void updateBreathingTest();
 void updateOutputs();
 void updateDisplay();
 void printTelemetry();
 float readPressureKpa();
+float readAirFlowSlm();
 const char* getPressureRangeLabel(float pressureKpa);
 const char* getSpo2StatusLabel();
 const char* getStateLabel();
+const char* getShortStateLabel();
 const char* getSampleQualityLabel(float pressureKpa);
+bool isEmergencyCondition();
 void startSample();
 void finishSample();
 void connectWifi();
@@ -149,6 +176,7 @@ void setup() {
 
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   initializePressureSensor();
+  initializeAirFlowSensor();
   initializeDisplay();
   initializeMax30102();
 
@@ -161,8 +189,10 @@ void setup() {
 
 void loop() {
   updatePressure();
+  updateAirFlow();
   updateMax30102();
   updateBreathingTest();
+  emergencyActive = isEmergencyCondition();
   updateOutputs();
 
   if (WiFi.status() != WL_CONNECTED) {
@@ -225,6 +255,7 @@ void ensureMqttConnection() {
   String willPayload = "{\"online\":false,\"mqttConnected\":false,\"wifiConnected\":false}";
 
   if (mqttClient.connect(clientId.c_str(), MQTT_TOPIC_STATUS, 1, true, willPayload.c_str())) {
+    mqttClient.subscribe(MQTT_TOPIC_CONTROL);
     publishDeviceStatus();
     Serial.println("MQTT conectado");
   } else {
@@ -234,9 +265,23 @@ void ensureMqttConnection() {
 }
 
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  (void)topic;
-  (void)payload;
-  (void)length;
+  if (strcmp(topic, MQTT_TOPIC_CONTROL) != 0) {
+    return;
+  }
+
+  String message;
+  message.reserve(length);
+  for (unsigned int i = 0; i < length; i++) {
+    message += static_cast<char>(payload[i]);
+  }
+
+  if (message.indexOf("\"monitoringEnabled\":true") >= 0) {
+    monitoringEnabled = true;
+  } else if (message.indexOf("\"monitoringEnabled\":false") >= 0) {
+    monitoringEnabled = false;
+  }
+
+  publishDeviceStatus();
 }
 
 void publishTelemetry() {
@@ -255,6 +300,7 @@ void publishTelemetry() {
   payload += "\"pulse\":" + String(pulseOut) + ",";
   payload += "\"oxygenSaturation\":" + String(spo2Out) + ",";
   payload += "\"lungCapacity\":" + String(lungPressureKpa, 3) + ",";
+  payload += "\"airFlow\":" + String(airFlowSlm, 2) + ",";
   payload += "\"state\":\"" + String(getStateLabel()) + "\",";
   payload += "\"timestamp\":" + String(millis()) + ",";
   payload += "\"mqttConnected\":" + String(mqttClient.connected() ? "true" : "false");
@@ -274,6 +320,8 @@ void publishDeviceStatus() {
   payload += "\"online\":true,";
   payload += "\"mqttConnected\":" + String(mqttClient.connected() ? "true" : "false") + ",";
   payload += "\"wifiConnected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
+  payload += "\"monitoringEnabled\":" + String(monitoringEnabled ? "true" : "false") + ",";
+  payload += "\"emergencyActive\":" + String(emergencyActive ? "true" : "false") + ",";
   payload += "\"ip\":\"" + ip + "\",";
   payload += "\"rssi\":" + String(WiFi.RSSI()) + ",";
   payload += "\"timestamp\":" + String(millis());
@@ -285,6 +333,11 @@ void publishDeviceStatus() {
 void initializePressureSensor() {
   analogReadResolution(12);
   analogSetPinAttenuation(LUNG_PRESSURE_PIN, ADC_11db);
+}
+
+void initializeAirFlowSensor() {
+  analogReadResolution(12);
+  analogSetPinAttenuation(AIR_FLOW_PIN, ADC_11db);
 }
 
 void initializeDisplay() {
@@ -344,6 +397,20 @@ void updatePressure() {
   if (lungPressureKpa < 0.0f) {
     lungPressureKpa = 0.0f;
   }
+}
+
+void updateAirFlow() {
+  airFlowRawSlm = readAirFlowSlm();
+
+  if (airFlowRawSlm < 0.0f) {
+    airFlowRawSlm = 0.0f;
+  }
+
+  if (airFlowRawSlm > AIR_FLOW_SENSOR_RANGE_SLM) {
+    airFlowRawSlm = AIR_FLOW_SENSOR_RANGE_SLM;
+  }
+
+  airFlowSlm = airFlowSlm + ((airFlowRawSlm - airFlowSlm) * AIR_FLOW_SMOOTHING);
 }
 
 void updateMax30102() {
@@ -484,28 +551,9 @@ void updateBreathingTest() {
 }
 
 void updateOutputs() {
-  bool redOn = false;
-  bool greenOn = false;
-  bool vibratorOn = false;
-
-  switch (breathingState) {
-    case STATE_WAIT_FINGER:
-      redOn = true;
-      break;
-
-    case STATE_READY_TO_TEST:
-    case STATE_SAMPLING:
-      greenOn = true;
-      break;
-
-    case STATE_RESULT: {
-      bool blinkOn = ((millis() / RESULT_BLINK_MS) % 2) == 0;
-      redOn = blinkOn;
-      greenOn = blinkOn;
-      vibratorOn = blinkOn;
-      break;
-    }
-  }
+  bool redOn = emergencyActive;
+  bool greenOn = mqttClient.connected() && monitoringEnabled;
+  bool vibratorOn = emergencyActive;
 
   digitalWrite(RELAY_RED_PIN, redOn ? HIGH : LOW);
   digitalWrite(RELAY_GREEN_PIN, greenOn ? HIGH : LOW);
@@ -519,81 +567,40 @@ void updateDisplay() {
 
   display.clearDisplay();
   display.setTextSize(1);
+  display.setTextWrap(false);
   display.setCursor(0, 0);
 
-  if (breathingState == STATE_WAIT_FINGER) {
-    display.println("Ponga dedo");
-    display.println("para iniciar");
-    display.print("Pulso: ");
-    display.println("--");
-    display.print("SpO2 : ");
-    display.println("--");
-  } else if (breathingState == STATE_READY_TO_TEST) {
-    display.print("Pulso: ");
-    if (validHeartRate && heartRateBpm > 0.0f) {
-      display.print(heartRateBpm, 0);
-      display.println(" bpm");
-    } else {
-      display.println("--");
-    }
-    display.print("SpO2 : ");
-    if (validSpO2 && spo2 > 0) {
-      display.print(static_cast<int32_t>(spo2Filtered + 0.5f));
-      display.print("% ");
-      display.println(getSpo2StatusLabel());
-    } else {
-      display.println("--");
-    }
-    display.print("Listo ");
-    display.println("respirar");
-    display.print("Pres: ");
-    display.print(lungPressureKpa, 2);
-    display.println(" kPa");
-  } else if (breathingState == STATE_SAMPLING) {
-    display.print("Pulso: ");
-    if (validHeartRate && heartRateBpm > 0.0f) {
-      display.print(heartRateBpm, 0);
-      display.println(" bpm");
-    } else {
-      display.println("--");
-    }
-    display.print("SpO2 : ");
-    if (validSpO2 && spo2 > 0) {
-      display.print(static_cast<int32_t>(spo2Filtered + 0.5f));
-      display.print("% ");
-      display.println(getSpo2StatusLabel());
-    } else {
-      display.println("--");
-    }
-    display.print("Pico : ");
-    display.print(samplePeakPressureKpa, 2);
-    display.println("kPa");
-    display.print("Tpo  : ");
-    display.print(sampleDurationMs / 1000.0f, 1);
-    display.println("s");
+  display.print("P:");
+  if (validHeartRate && heartRateBpm > 0.0f) {
+    display.print(heartRateBpm, 0);
   } else {
-    display.print("Pulso: ");
-    if (validHeartRate && heartRateBpm > 0.0f) {
-      display.print(heartRateBpm, 0);
-      display.println(" bpm");
-    } else {
-      display.println("--");
-    }
-    display.print("SpO2 : ");
-    if (validSpO2 && spo2 > 0) {
-      display.print(static_cast<int32_t>(spo2Filtered + 0.5f));
-      display.print("% ");
-      display.println(getSpo2StatusLabel());
-    } else {
-      display.println("--");
-    }
-    display.print("Resultado: ");
-    display.println(getSampleQualityLabel(lastSamplePeakPressureKpa));
-    display.print("Fuerza: ");
-    display.println(getPressureRangeLabel(lastSamplePeakPressureKpa));
-    display.print("Pico:");
-    display.print(lastSamplePeakPressureKpa, 2);
-    display.print("k");
+    display.print("--");
+  }
+  display.print(" S:");
+  if (validSpO2 && spo2 > 0) {
+    display.print(static_cast<int32_t>(spo2Filtered + 0.5f));
+    display.print('%');
+  } else {
+    display.print("--");
+  }
+  display.println();
+
+  display.print("Pr:");
+  display.print(lungPressureKpa, 2);
+  display.println("kPa");
+
+  display.print("Fl:");
+  display.print(airFlowSlm, 1);
+  display.println(" SLM");
+
+  if (emergencyActive) {
+    display.println("ALERTA CLINICA");
+  } else if (mqttClient.connected() && monitoringEnabled) {
+    display.println("MONITOREO ON");
+  } else if (!mqttClient.connected()) {
+    display.println("MQTT OFF");
+  } else {
+    display.println(getShortStateLabel());
   }
 
   display.display();
@@ -626,9 +633,19 @@ void printTelemetry() {
   Serial.print(" kPa | Rango: ");
   Serial.println(getPressureRangeLabel(lungPressureKpa));
 
+  Serial.print("Flujo de aire: ");
+  Serial.print(airFlowSlm, 2);
+  Serial.println(" SLM");
+
   Serial.print("Base respiracion: ");
   Serial.print(lungPressureBaselineKpa, 2);
   Serial.println(" kPa");
+
+  Serial.print("Monitoreo remoto: ");
+  Serial.println(monitoringEnabled ? "ACTIVO" : "INACTIVO");
+
+  Serial.print("Emergencia: ");
+  Serial.println(emergencyActive ? "SI" : "NO");
 
   if (breathingState == STATE_RESULT) {
     Serial.print("Muestra final -> Resultado: ");
@@ -653,6 +670,26 @@ float readPressureKpa() {
     (sensorVoltage - MPXV7002_ZERO_PRESSURE_V) / MPXV7002_SENSITIVITY_V_PER_KPA;
 
   return pressureKpa + PRESSURE_OFFSET_KPA;
+}
+
+float readAirFlowSlm() {
+  uint16_t rawAdc = analogRead(AIR_FLOW_PIN);
+  float adcVoltage = (static_cast<float>(rawAdc) / ADC_RESOLUTION) * ADC_REFERENCE_V;
+  float sensorVoltage = adcVoltage * AIR_FLOW_SENSOR_OUTPUT_DIVIDER;
+  float flowSlm =
+    AIR_FLOW_SENSOR_RANGE_SLM *
+    ((sensorVoltage - AIR_FLOW_SENSOR_ZERO_V) /
+     (AIR_FLOW_SENSOR_FULL_SCALE_V - AIR_FLOW_SENSOR_ZERO_V));
+
+  if (flowSlm < 0.0f) {
+    return 0.0f;
+  }
+
+  if (flowSlm > AIR_FLOW_SENSOR_RANGE_SLM) {
+    return AIR_FLOW_SENSOR_RANGE_SLM;
+  }
+
+  return flowSlm;
 }
 
 const char* getPressureRangeLabel(float pressureKpa) {
@@ -704,6 +741,21 @@ const char* getStateLabel() {
   }
 }
 
+const char* getShortStateLabel() {
+  switch (breathingState) {
+    case STATE_WAIT_FINGER:
+      return "ESPERA DEDO";
+    case STATE_READY_TO_TEST:
+      return "LISTO";
+    case STATE_SAMPLING:
+      return "MUESTRA";
+    case STATE_RESULT:
+      return "RESULTADO";
+    default:
+      return "DESCONOCIDO";
+  }
+}
+
 const char* getSampleQualityLabel(float pressureKpa) {
   if (pressureKpa >= 1.5f && pressureKpa <= 4.5f) {
     return "BUENA";
@@ -712,6 +764,28 @@ const char* getSampleQualityLabel(float pressureKpa) {
     return "REGULAR";
   }
   return "REPETIR";
+}
+
+bool isEmergencyCondition() {
+  if (validSpO2 && spo2Filtered > 0.0f && spo2Filtered < EMERGENCY_SPO2_LOW) {
+    return true;
+  }
+
+  if (validHeartRate &&
+      (heartRateBpm < EMERGENCY_HEART_RATE_LOW_BPM ||
+       heartRateBpm > EMERGENCY_HEART_RATE_HIGH_BPM)) {
+    return true;
+  }
+
+  if (lungPressureKpa >= EMERGENCY_PRESSURE_HIGH_KPA) {
+    return true;
+  }
+
+  if (airFlowSlm >= EMERGENCY_AIR_FLOW_HIGH_SLM) {
+    return true;
+  }
+
+  return false;
 }
 
 void startSample() {

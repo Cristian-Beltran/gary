@@ -25,8 +25,10 @@ export class SessionController {
 
   // POST /sessions  -> crea una sesión
   @Post()
-  createSession(@Body() dto: CreateSessionDto) {
-    return this.sessionService.createSession(dto);
+  async createSession(@Body() dto: CreateSessionDto) {
+    const session = await this.sessionService.createSession(dto);
+    await this.mqttTelemetryService.publishMonitoringControl(true);
+    return session;
   }
 
   // POST /sessions/:id/data -> agrega una fila de datos a la sesión
@@ -39,8 +41,10 @@ export class SessionController {
   }
 
   @Patch(':id/close')
-  closeSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return this.sessionService.closeSession(id);
+  async closeSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    const session = await this.sessionService.closeSession(id);
+    await this.mqttTelemetryService.publishMonitoringControl(false);
+    return session;
   }
 
   @Get()
