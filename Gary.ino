@@ -84,10 +84,10 @@ constexpr float EMERGENCY_PRESSURE_HIGH_KPA = 4.5f;
 constexpr float EMERGENCY_AIR_FLOW_HIGH_SLM = 140.0f;
 
 // WiFi + MQTT (configuracion local)
-//const char* WIFI_SSID = "Estudiantes";
-//const char* WIFI_PASSWORD = "EstWifi.0224";
-const char* WIFI_SSID = "Cordova hogar ext";
-const char* WIFI_PASSWORD = "4ndiNicol3";
+const char* WIFI_SSID = "Estudiantes";
+const char* WIFI_PASSWORD = "EstWifi.0224";
+//const char* WIFI_SSID = "Cordova hogar ext";
+//const char* WIFI_PASSWORD = "4ndiNicol3";
 
 const char* MQTT_BROKER = "broker.hivemq.com";
 const uint16_t MQTT_PORT = 1883;
