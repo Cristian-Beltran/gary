@@ -26,6 +26,9 @@ export function SessionCharts({ sessions }: Props) {
       const spo2 = recs.map((r) => r.oxygenSaturation);
       const pressure = recs.map((r) => r.lungCapacity);
       const flow = recs.map((r) => r.airFlow);
+      const peakFlow = recs.map((r) => r.peakExpiratoryFlow);
+      const respiratoryRate = recs.map((r) => r.respiratoryRate);
+      const expiratoryVolume = recs.map((r) => r.expiratoryVolume);
       const avg = (arr: number[]) =>
         arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
       const durationMin = s.endedAt
@@ -41,13 +44,16 @@ export function SessionCharts({ sessions }: Props) {
         avgSpo2: Number(avg(spo2).toFixed(1)),
         avgPressure: Number(avg(pressure).toFixed(2)),
         avgFlow: Number(avg(flow).toFixed(1)),
+        avgPeakFlow: Number(avg(peakFlow).toFixed(1)),
+        avgRespiratoryRate: Number(avg(respiratoryRate).toFixed(1)),
+        avgExpiratoryVolume: Number(avg(expiratoryVolume).toFixed(2)),
         durationMin: Number(durationMin.toFixed(1)),
       };
     });
   }, [sessions]);
 
   const timeline = useMemo(() => {
-    const points: Array<{ time: string; pulse: number; spo2: number; pressure: number; flow: number }> = [];
+    const points: Array<{ time: string; pulse: number; spo2: number; pressure: number; flow: number; peakFlow: number; respiratoryRate: number; expiratoryVolume: number }> = [];
     sessions.forEach((s) => {
       (s.records ?? []).forEach((r) => {
         points.push({
@@ -59,6 +65,9 @@ export function SessionCharts({ sessions }: Props) {
           spo2: r.oxygenSaturation,
           pressure: r.lungCapacity,
           flow: r.airFlow,
+          peakFlow: r.peakExpiratoryFlow,
+          respiratoryRate: r.respiratoryRate,
+          expiratoryVolume: r.expiratoryVolume,
         });
       });
     });
@@ -81,7 +90,7 @@ export function SessionCharts({ sessions }: Props) {
       <Card className="border-dotted">
         <CardHeader>
           <CardTitle>Promedios por sesion</CardTitle>
-          <CardDescription>Pulso, SpO2, presion respiratoria y flujo</CardDescription>
+          <CardDescription>Pulso, SpO2 y metricas respiratorias derivadas</CardDescription>
         </CardHeader>
         <CardContent className="h-[320px]">
           <ResponsiveContainer width="100%" height="100%">
@@ -95,6 +104,9 @@ export function SessionCharts({ sessions }: Props) {
               <Line type="monotone" dataKey="avgSpo2" stroke="#2563eb" dot={false} />
               <Line type="monotone" dataKey="avgPressure" stroke="#059669" dot={false} />
               <Line type="monotone" dataKey="avgFlow" stroke="#7c3aed" dot={false} />
+              <Line type="monotone" dataKey="avgPeakFlow" stroke="#ea580c" dot={false} />
+              <Line type="monotone" dataKey="avgRespiratoryRate" stroke="#0f766e" dot={false} />
+              <Line type="monotone" dataKey="avgExpiratoryVolume" stroke="#9333ea" dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </CardContent>
@@ -134,6 +146,9 @@ export function SessionCharts({ sessions }: Props) {
               <Line type="monotone" dataKey="spo2" stroke="#2563eb" dot={false} />
               <Line type="monotone" dataKey="pressure" stroke="#059669" dot={false} />
               <Line type="monotone" dataKey="flow" stroke="#7c3aed" dot={false} />
+              <Line type="monotone" dataKey="peakFlow" stroke="#ea580c" dot={false} />
+              <Line type="monotone" dataKey="respiratoryRate" stroke="#0f766e" dot={false} />
+              <Line type="monotone" dataKey="expiratoryVolume" stroke="#9333ea" dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </CardContent>

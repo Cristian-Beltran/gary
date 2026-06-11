@@ -3,6 +3,9 @@ export interface TrainingExercise {
   title: string;
   goal?: string;
   cue?: string;
+  videoUrl?: string;
+  videoTitle?: string;
+  videoDescription?: string;
   durationSec: number;
   rounds?: number;
   restSec?: number;

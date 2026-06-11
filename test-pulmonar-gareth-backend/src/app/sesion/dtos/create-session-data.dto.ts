@@ -8,6 +8,15 @@ export class CreateSessionDataDto {
   @IsNumber()
   airFlow: number;
 
+  @IsNumber()
+  peakExpiratoryFlow: number;
+
+  @IsNumber()
+  respiratoryRate: number;
+
+  @IsNumber()
+  expiratoryVolume: number;
+
   @IsInt()
   pulse: number;
 

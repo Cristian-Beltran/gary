@@ -59,6 +59,9 @@ export class SessionService {
       session,
       lungCapacity: dto.lungCapacity,
       airFlow: dto.airFlow,
+      peakExpiratoryFlow: dto.peakExpiratoryFlow,
+      respiratoryRate: dto.respiratoryRate,
+      expiratoryVolume: dto.expiratoryVolume,
       pulse: dto.pulse,
       oxygenSaturation: dto.oxygenSaturation,
     });
@@ -104,6 +107,22 @@ export class SessionService {
     });
 
     return sessions;
+  }
+
+  async findOneDetailed(sessionId: string): Promise<Session> {
+    const session = await this.sessionRepo.findOne({
+      where: { id: sessionId },
+      relations: ['records', 'patient', 'patient.user'],
+      order: {
+        records: { recordedAt: 'ASC' },
+      },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    return session;
   }
 
   async getAll(): Promise<Session[]> {

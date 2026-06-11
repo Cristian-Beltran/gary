@@ -45,6 +45,9 @@ function sessionAverages(session: Session) {
     spo2: avg(recs.map((r) => r.oxygenSaturation)),
     pressure: avg(recs.map((r) => r.lungCapacity)),
     flow: avg(recs.map((r) => r.airFlow)),
+    peakFlow: avg(recs.map((r) => r.peakExpiratoryFlow)),
+    respiratoryRate: avg(recs.map((r) => r.respiratoryRate)),
+    expiratoryVolume: avg(recs.map((r) => r.expiratoryVolume)),
   };
 }
 
@@ -139,6 +142,9 @@ export function PatientDashboard({ user }: Props) {
           pulse: Number(m.pulse.toFixed(1)),
           pressure: Number(m.pressure.toFixed(2)),
           flow: Number(m.flow.toFixed(1)),
+          peakFlow: Number(m.peakFlow.toFixed(1)),
+          respiratoryRate: Number(m.respiratoryRate.toFixed(1)),
+          expiratoryVolume: Number(m.expiratoryVolume.toFixed(2)),
         };
       });
   }, [filteredSessions]);
@@ -208,17 +214,20 @@ export function PatientDashboard({ user }: Props) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 md:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-7">
         <Kpi title="Pulso prom." value={latestAvg ? `${latestAvg.pulse.toFixed(0)} bpm` : "-"} icon={<Heart className="h-4 w-4" />} />
         <Kpi title="SpO2 prom." value={latestAvg ? `${latestAvg.spo2.toFixed(0)} %` : "-"} icon={<Droplets className="h-4 w-4" />} />
         <Kpi title="Presion prom." value={latestAvg ? `${latestAvg.pressure.toFixed(2)} kPa` : "-"} icon={<Wind className="h-4 w-4" />} />
         <Kpi title="Flujo prom." value={latestAvg ? `${latestAvg.flow.toFixed(1)} SLM` : "-"} icon={<Wind className="h-4 w-4" />} />
+        <Kpi title="Flujo pico prom." value={latestAvg ? `${latestAvg.peakFlow.toFixed(1)} SLM` : "-"} icon={<Wind className="h-4 w-4" />} />
+        <Kpi title="Freq. resp." value={latestAvg ? `${latestAvg.respiratoryRate.toFixed(1)} rpm` : "-"} icon={<Activity className="h-4 w-4" />} />
+        <Kpi title="Volumen esp." value={latestAvg ? `${latestAvg.expiratoryVolume.toFixed(2)} L` : "-"} icon={<Droplets className="h-4 w-4" />} />
         <Kpi
           title="Tendencia"
           value={globalTrend === "mejorando" ? "Mejorando" : globalTrend === "revisar" ? "Revisar" : "Estable"}
           icon={globalTrend === "mejorando" ? <TrendingUp className="h-4 w-4" /> : globalTrend === "revisar" ? <TrendingDown className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
         />
-        <Card className="bg-gradient-to-br from-amber-50 to-lime-50">
+        <Card className="bg-gradient-to-br from-amber-50 to-lime-50 md:col-span-2 xl:col-span-1">
           <CardContent className="py-4 flex items-center justify-between">
             <div>
               <div className="text-xs text-muted-foreground">Adherencia semanal</div>
@@ -256,6 +265,9 @@ export function PatientDashboard({ user }: Props) {
                 <Line dataKey="pulse" stroke="#ef4444" strokeWidth={2.5} dot={false} />
                 <Line dataKey="pressure" stroke="#059669" strokeWidth={2.5} dot={false} />
                 <Line dataKey="flow" stroke="#7c3aed" strokeWidth={2.5} dot={false} />
+                <Line dataKey="peakFlow" stroke="#ea580c" strokeWidth={2.5} dot={false} />
+                <Line dataKey="respiratoryRate" stroke="#0f766e" strokeWidth={2.5} dot={false} />
+                <Line dataKey="expiratoryVolume" stroke="#9333ea" strokeWidth={2.5} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -285,6 +297,9 @@ export function PatientDashboard({ user }: Props) {
                     <div>Pulso: {m.pulse.toFixed(0)} bpm</div>
                     <div>Presion: {m.pressure.toFixed(2)} kPa</div>
                     <div>Flujo: {m.flow.toFixed(1)} SLM</div>
+                    <div>Flujo pico: {m.peakFlow.toFixed(1)} SLM</div>
+                    <div>Freq. resp.: {m.respiratoryRate.toFixed(1)} rpm</div>
+                    <div>Volumen esp.: {m.expiratoryVolume.toFixed(2)} L</div>
                   </div>
                 </div>
               );

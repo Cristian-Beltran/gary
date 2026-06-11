@@ -8,6 +8,7 @@ import type {
   DeviceStatus,
   RealtimeTelemetry,
   Session,
+  TelemetryAnalysis,
 } from "@/modules/Session/session.interface";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,11 +22,16 @@ type LivePoint = {
   spo2: number;
   pressure: number;
   flow: number;
+  peakFlow: number;
+  respRate: number;
+  expVolume: number;
 };
 
 function fmtTime(iso?: string) {
   if (!iso) return "-";
-  return new Date(iso).toLocaleTimeString("es-ES", {
+  const numericTimestamp = Number(iso);
+  const date = Number.isFinite(numericTimestamp) ? new Date(numericTimestamp) : new Date(iso);
+  return date.toLocaleTimeString("es-ES", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -60,6 +66,7 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [latestTelemetry, setLatestTelemetry] = useState<RealtimeTelemetry | null>(null);
   const [deviceStatus, setDeviceStatus] = useState<DeviceStatus | null>(null);
+  const [analysis, setAnalysis] = useState<TelemetryAnalysis | null>(null);
   const [live, setLive] = useState<LivePoint[]>([]);
   const [appliedBySession, setAppliedBySession] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
@@ -73,10 +80,12 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
         sessionService.getLatestTelemetry(),
         sessionService.getDeviceStatus(),
       ]);
+      const latestAnalysis = await sessionService.getLatestAnalysis();
       setSessions(allSessions ?? []);
       setActiveSession(active);
       setLatestTelemetry(latest);
       setDeviceStatus(status);
+      setAnalysis(latestAnalysis);
       if (latest) {
         setLive((prev) => {
           if (prev.length && prev[prev.length - 1]?.time === fmtTime(latest.timestamp)) {
@@ -90,6 +99,9 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
               spo2: latest.oxygenSaturation,
               pressure: latest.lungCapacity,
               flow: latest.airFlow,
+              peakFlow: latest.peakExpiratoryFlow,
+              respRate: latest.respiratoryRate,
+              expVolume: latest.expiratoryVolume,
             },
           ].slice(-60);
         });
@@ -202,7 +214,7 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-4">
+      <div className="grid gap-6 lg:grid-cols-7">
         <MetricCard title="Pulso" value={latestTelemetry?.pulse} unit="bpm" icon={<Heart className="h-4 w-4" />} />
         <MetricCard title="SpO2" value={latestTelemetry?.oxygenSaturation} unit="%" icon={<Droplets className="h-4 w-4" />} />
         <MetricCard
@@ -212,7 +224,22 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
           icon={<Wind className="h-4 w-4" />}
         />
         <MetricCard title="Flujo de aire" value={latestTelemetry?.airFlow} unit="SLM" icon={<Wind className="h-4 w-4" />} />
+        <MetricCard title="Flujo pico esp." value={latestTelemetry?.peakExpiratoryFlow} unit="SLM" icon={<Wind className="h-4 w-4" />} />
+        <MetricCard title="Frecuencia resp." value={latestTelemetry?.respiratoryRate} unit="rpm" icon={<Activity className="h-4 w-4" />} />
+        <MetricCard title="Volumen esp." value={latestTelemetry?.expiratoryVolume} unit="L" icon={<Droplets className="h-4 w-4" />} />
       </div>
+
+      <Card className="border-sky-200/60 bg-gradient-to-r from-sky-50 to-indigo-50">
+        <CardHeader>
+          <CardTitle>Analisis respiratorio</CardTitle>
+          <CardDescription>
+            {analysis ? `Fuente ${analysis.source.toUpperCase()} · ${fmtTime(analysis.generatedAt)}` : "Sin datos"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="rounded-lg border bg-white/70 p-3 text-sm">{analysis?.summary ?? "Esperando analisis respiratorio."}</div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -224,6 +251,9 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
           <MiniLine data={live} dataKey="spo2" color="#2563eb" title="SpO2" />
           <MiniLine data={live} dataKey="pressure" color="#059669" title="Presion respiratoria" />
           <MiniLine data={live} dataKey="flow" color="#7c3aed" title="Flujo de aire" />
+          <MiniLine data={live} dataKey="peakFlow" color="#ea580c" title="Flujo pico espiratorio" />
+          <MiniLine data={live} dataKey="respRate" color="#0f766e" title="Frecuencia respiratoria" />
+          <MiniLine data={live} dataKey="expVolume" color="#9333ea" title="Volumen espiratorio" />
         </CardContent>
       </Card>
 
@@ -290,7 +320,7 @@ function MiniLine({
   title,
 }: {
   data: LivePoint[];
-  dataKey: "pulse" | "spo2" | "pressure" | "flow";
+  dataKey: "pulse" | "spo2" | "pressure" | "flow" | "peakFlow" | "respRate" | "expVolume";
   color: string;
   title: string;
 }) {

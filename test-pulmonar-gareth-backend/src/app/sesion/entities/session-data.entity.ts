@@ -22,6 +22,15 @@ export class SessionData {
   @Column('float', { default: 0 })
   airFlow: number;
 
+  @Column('float', { default: 0 })
+  peakExpiratoryFlow: number;
+
+  @Column('float', { default: 0 })
+  respiratoryRate: number;
+
+  @Column('float', { default: 0 })
+  expiratoryVolume: number;
+
   @Column('int')
   pulse: number;
 

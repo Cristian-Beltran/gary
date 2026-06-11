@@ -70,6 +70,11 @@ constexpr float AIR_FLOW_SENSOR_ZERO_V = 0.5f;
 constexpr float AIR_FLOW_SENSOR_FULL_SCALE_V = 4.5f;
 constexpr float AIR_FLOW_SENSOR_OUTPUT_DIVIDER = 2.0f;
 constexpr float AIR_FLOW_SMOOTHING = 0.20f;
+constexpr float EXHALATION_FLOW_THRESHOLD_SLM = 0.8f;
+constexpr float EXHALATION_END_THRESHOLD_SLM = 0.3f;
+constexpr unsigned long EXHALATION_END_HOLD_MS = 350;
+constexpr unsigned long RESPIRATORY_RATE_WINDOW_MS = 60000;
+constexpr uint8_t RESPIRATION_HISTORY_SIZE = 12;
 
 // Umbrales de emergencia local
 constexpr float EMERGENCY_HEART_RATE_LOW_BPM = 45.0f;
@@ -83,6 +88,7 @@ constexpr float EMERGENCY_AIR_FLOW_HIGH_SLM = 140.0f;
 //const char* WIFI_PASSWORD = "EstWifi.0224";
 const char* WIFI_SSID = "Cordova hogar ext";
 const char* WIFI_PASSWORD = "4ndiNicol3";
+
 const char* MQTT_BROKER = "broker.hivemq.com";
 const uint16_t MQTT_PORT = 1883;
 const char* MQTT_TOPIC_TELEMETRY = "gary/device/telemetry";
@@ -111,6 +117,17 @@ float lungPressureKpa = 0.0f;
 float lungPressureBaselineKpa = 0.0f;
 float airFlowRawSlm = 0.0f;
 float airFlowSlm = 0.0f;
+float peakExpiratoryFlowSlm = 0.0f;
+float respiratoryRateBpm = 0.0f;
+float expiratoryVolumeLiters = 0.0f;
+float currentExhalationPeakFlowSlm = 0.0f;
+float currentExhalationVolumeLiters = 0.0f;
+bool exhalationActive = false;
+unsigned long exhalationBelowThresholdMs = 0;
+unsigned long lastAirFlowSampleMs = 0;
+unsigned long breathTimestampsMs[RESPIRATION_HISTORY_SIZE] = {0};
+uint8_t breathHistoryCount = 0;
+uint8_t breathHistoryIndex = 0;
 bool pressureBaselineReady = false;
 uint32_t lastIrValue = 0;
 bool fingerDetected = false;
@@ -144,6 +161,7 @@ void initializeAirFlowSensor();
 void initializeDisplay();
 void updatePressure();
 void updateAirFlow();
+void updateRespiratoryMetrics();
 void updateMax30102();
 void updateBreathingTest();
 void updateOutputs();
@@ -190,6 +208,7 @@ void setup() {
 void loop() {
   updatePressure();
   updateAirFlow();
+  updateRespiratoryMetrics();
   updateMax30102();
   updateBreathingTest();
   emergencyActive = isEmergencyCondition();
@@ -301,6 +320,9 @@ void publishTelemetry() {
   payload += "\"oxygenSaturation\":" + String(spo2Out) + ",";
   payload += "\"lungCapacity\":" + String(lungPressureKpa, 3) + ",";
   payload += "\"airFlow\":" + String(airFlowSlm, 2) + ",";
+  payload += "\"peakExpiratoryFlow\":" + String(peakExpiratoryFlowSlm, 2) + ",";
+  payload += "\"respiratoryRate\":" + String(respiratoryRateBpm, 2) + ",";
+  payload += "\"expiratoryVolume\":" + String(expiratoryVolumeLiters, 3) + ",";
   payload += "\"state\":\"" + String(getStateLabel()) + "\",";
   payload += "\"timestamp\":" + String(millis()) + ",";
   payload += "\"mqttConnected\":" + String(mqttClient.connected() ? "true" : "false");
@@ -411,6 +433,96 @@ void updateAirFlow() {
   }
 
   airFlowSlm = airFlowSlm + ((airFlowRawSlm - airFlowSlm) * AIR_FLOW_SMOOTHING);
+}
+
+void updateRespiratoryMetrics() {
+  unsigned long now = millis();
+  if (lastAirFlowSampleMs == 0) {
+    lastAirFlowSampleMs = now;
+    return;
+  }
+
+  float deltaSeconds = (now - lastAirFlowSampleMs) / 1000.0f;
+  lastAirFlowSampleMs = now;
+
+  if (deltaSeconds <= 0.0f || deltaSeconds > 1.0f) {
+    return;
+  }
+
+  if (!exhalationActive && airFlowSlm >= EXHALATION_FLOW_THRESHOLD_SLM) {
+    exhalationActive = true;
+    exhalationBelowThresholdMs = 0;
+    currentExhalationPeakFlowSlm = airFlowSlm;
+    currentExhalationVolumeLiters = 0.0f;
+  }
+
+  if (exhalationActive) {
+    if (airFlowSlm > currentExhalationPeakFlowSlm) {
+      currentExhalationPeakFlowSlm = airFlowSlm;
+    }
+
+    if (airFlowSlm > EXHALATION_END_THRESHOLD_SLM) {
+      currentExhalationVolumeLiters += (airFlowSlm / 60.0f) * deltaSeconds;
+      exhalationBelowThresholdMs = 0;
+    } else if (exhalationBelowThresholdMs == 0) {
+      exhalationBelowThresholdMs = now;
+    }
+
+    if (exhalationBelowThresholdMs > 0 &&
+        now - exhalationBelowThresholdMs >= EXHALATION_END_HOLD_MS) {
+      exhalationActive = false;
+      peakExpiratoryFlowSlm = currentExhalationPeakFlowSlm;
+      expiratoryVolumeLiters = currentExhalationVolumeLiters;
+
+      breathTimestampsMs[breathHistoryIndex] = now;
+      breathHistoryIndex = (breathHistoryIndex + 1) % RESPIRATION_HISTORY_SIZE;
+      if (breathHistoryCount < RESPIRATION_HISTORY_SIZE) {
+        breathHistoryCount++;
+      }
+
+      uint8_t validBreaths = 0;
+      unsigned long oldestBreathMs = now;
+      for (uint8_t i = 0; i < breathHistoryCount; i++) {
+        unsigned long breathMs = breathTimestampsMs[i];
+        if (breathMs > 0 && now - breathMs <= RESPIRATORY_RATE_WINDOW_MS) {
+          validBreaths++;
+          if (breathMs < oldestBreathMs) {
+            oldestBreathMs = breathMs;
+          }
+        }
+      }
+
+      if (validBreaths >= 2 && oldestBreathMs < now) {
+        float windowMinutes = (now - oldestBreathMs) / 60000.0f;
+        if (windowMinutes > 0.0f) {
+          respiratoryRateBpm = (validBreaths - 1) / windowMinutes;
+        }
+      } else if (validBreaths == 1) {
+        respiratoryRateBpm = 0.0f;
+      }
+
+      currentExhalationPeakFlowSlm = 0.0f;
+      currentExhalationVolumeLiters = 0.0f;
+      exhalationBelowThresholdMs = 0;
+    }
+  }
+
+  if (!exhalationActive && airFlowSlm < EXHALATION_END_THRESHOLD_SLM) {
+    bool hasRecentBreath = false;
+    for (uint8_t i = 0; i < breathHistoryCount; i++) {
+      unsigned long breathMs = breathTimestampsMs[i];
+      if (breathMs > 0 && now - breathMs <= RESPIRATORY_RATE_WINDOW_MS) {
+        hasRecentBreath = true;
+        break;
+      }
+    }
+
+    if (!hasRecentBreath) {
+      respiratoryRateBpm = 0.0f;
+      peakExpiratoryFlowSlm = 0.0f;
+      expiratoryVolumeLiters = 0.0f;
+    }
+  }
 }
 
 void updateMax30102() {
@@ -636,6 +748,18 @@ void printTelemetry() {
   Serial.print("Flujo de aire: ");
   Serial.print(airFlowSlm, 2);
   Serial.println(" SLM");
+
+  Serial.print("Flujo pico espiratorio: ");
+  Serial.print(peakExpiratoryFlowSlm, 2);
+  Serial.println(" SLM");
+
+  Serial.print("Frecuencia respiratoria: ");
+  Serial.print(respiratoryRateBpm, 2);
+  Serial.println(" rpm");
+
+  Serial.print("Volumen espiratorio: ");
+  Serial.print(expiratoryVolumeLiters, 3);
+  Serial.println(" L");
 
   Serial.print("Base respiracion: ");
   Serial.print(lungPressureBaselineKpa, 2);

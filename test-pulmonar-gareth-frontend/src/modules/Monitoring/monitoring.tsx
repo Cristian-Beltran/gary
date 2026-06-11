@@ -12,7 +12,9 @@ import {
 import { sessionService } from "@/modules/Session/data/session.service";
 import { patientService } from "@/modules/Patient/data/patient.service";
 import { trainingService } from "@/modules/Training/data/training.service";
+import { TrainingVideoDialog } from "@/modules/Training/components/training-video-dialog";
 import type { Session } from "@/modules/Session/session.interface";
+import type { TelemetryAnalysis } from "@/modules/Session/session.interface";
 import type { Patient } from "@/modules/Patient/patient.interface";
 import type { TrainingExercise } from "@/modules/Training/training.interface";
 import {
@@ -24,7 +26,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Check, Activity, Droplets, Wind } from "lucide-react";
+import { AlertTriangle, Check, Activity, Droplets, Wind, Gauge, Waves, Video } from "lucide-react";
 import { useAuthStore } from "@/auth/useAuth";
 
 const MQTT_BROKER_URL = "ws://broker.hivemq.com:8000/mqtt";
@@ -36,12 +38,21 @@ type RealtimeRow = {
   oxygenSaturation: number;
   lungCapacity: number;
   airFlow: number;
+  peakExpiratoryFlow: number;
+  respiratoryRate: number;
+  expiratoryVolume: number;
   state?: string;
 };
 
 function fmtTime(iso?: string) {
+  if (!iso) {
+    return "-";
+  }
+
+  const numericTimestamp = Number(iso);
+  const date = Number.isFinite(numericTimestamp) ? new Date(numericTimestamp) : new Date(iso);
   return iso
-    ? new Date(iso).toLocaleTimeString("es-ES", {
+    ? date.toLocaleTimeString("es-ES", {
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
@@ -65,23 +76,36 @@ function parseGaryPayload(raw: string): RealtimeRow | null {
       obj.lungCapacity ?? obj.lungPressureKpa ?? obj.pressure,
     );
     const airFlow = Number(obj.airFlow ?? obj.flowRate ?? obj.flow ?? obj.airflow);
+    const peakExpiratoryFlow = Number(obj.peakExpiratoryFlow ?? obj.peakFlow ?? obj.peakExpFlow);
+    const respiratoryRate = Number(obj.respiratoryRate ?? obj.breathRate ?? obj.respRate);
+    const expiratoryVolume = Number(obj.expiratoryVolume ?? obj.exhaledVolume ?? obj.expVolume);
 
     if (
       Number.isFinite(pulse) &&
       Number.isFinite(oxygenSaturation) &&
       Number.isFinite(lungCapacity) &&
-      Number.isFinite(airFlow)
+      Number.isFinite(airFlow) &&
+      Number.isFinite(peakExpiratoryFlow) &&
+      Number.isFinite(respiratoryRate) &&
+      Number.isFinite(expiratoryVolume)
     ) {
+      const timestamp =
+        typeof obj.timestamp === "number"
+          ? String(obj.timestamp)
+          : typeof obj.timestamp === "string"
+            ? obj.timestamp
+            : String(Date.now());
+
       return {
         pulse,
         oxygenSaturation,
         lungCapacity,
         airFlow,
+        peakExpiratoryFlow,
+        respiratoryRate,
+        expiratoryVolume,
         state: typeof obj.state === "string" ? obj.state : undefined,
-        timestamp:
-          typeof obj.timestamp === "string"
-            ? obj.timestamp
-            : new Date().toISOString(),
+        timestamp,
       };
     }
   } catch {
@@ -103,6 +127,8 @@ export default function MonitoringPage() {
   const [doctorExercises, setDoctorExercises] = useState<TrainingExercise[]>([]);
   const [appliedExerciseIds, setAppliedExerciseIds] = useState<string[]>([]);
   const [appliedCount, setAppliedCount] = useState(0);
+  const [analysis, setAnalysis] = useState<TelemetryAnalysis | null>(null);
+  const [videoExercise, setVideoExercise] = useState<TrainingExercise | null>(null);
   const clientRef = useRef<MqttClient | null>(null);
 
   useEffect(() => {
@@ -186,6 +212,24 @@ export default function MonitoringPage() {
       // no-op
     }
   };
+
+  useEffect(() => {
+    const loadAnalysis = async () => {
+      try {
+        const latest = await sessionService.getLatestAnalysis();
+        setAnalysis(latest);
+      } catch {
+        setAnalysis(null);
+      }
+    };
+
+    void loadAnalysis();
+    const timer = setInterval(() => {
+      void loadAnalysis();
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const client = mqtt.connect(MQTT_BROKER_URL, {
@@ -274,6 +318,9 @@ export default function MonitoringPage() {
         spo2: row.oxygenSaturation,
         pressure: row.lungCapacity,
         flow: row.airFlow,
+        peakFlow: row.peakExpiratoryFlow,
+        respRate: row.respiratoryRate,
+        expVolume: row.expiratoryVolume,
       })),
     [realtime],
   );
@@ -365,7 +412,7 @@ export default function MonitoringPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-6">
             <Metric title="Pulso" value={last?.pulse} unit="bpm" icon={<Activity className="h-4 w-4" />} />
             <Metric title="SpO2" value={last?.oxygenSaturation} unit="%" icon={<Droplets className="h-4 w-4" />} />
             <Metric
@@ -375,6 +422,31 @@ export default function MonitoringPage() {
               icon={<Wind className="h-4 w-4" />}
             />
             <Metric title="Flujo de aire" value={last?.airFlow} unit="SLM" icon={<Wind className="h-4 w-4" />} />
+            <Metric title="Flujo pico esp." value={last?.peakExpiratoryFlow} unit="SLM" icon={<Gauge className="h-4 w-4" />} />
+            <Metric title="Frecuencia resp." value={last?.respiratoryRate} unit="rpm" icon={<Waves className="h-4 w-4" />} />
+            <Metric title="Volumen esp." value={last?.expiratoryVolume} unit="L" icon={<Wind className="h-4 w-4" />} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-sky-300/50 bg-gradient-to-r from-sky-50 to-indigo-50">
+        <CardHeader>
+          <CardTitle>Analisis respiratorio</CardTitle>
+          <CardDescription>
+            {analysis
+              ? `Fuente: ${analysis.source.toUpperCase()} · Actualizado ${fmtTime(analysis.generatedAt)}`
+              : "Sin analisis disponible"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="rounded-lg border bg-white/70 p-3 text-sm">
+            {analysis?.summary ?? "Esperando una ventana respiratoria valida para analizar."}
+          </div>
+          <div className="grid gap-3 md:grid-cols-4 text-sm">
+            <StatMini label="Flujo medio" value={`${analysis?.metrics.averageAirFlow?.toFixed(1) ?? "0.0"} SLM`} />
+            <StatMini label="Pico espiratorio" value={`${analysis?.metrics.peakExpiratoryFlow?.toFixed(1) ?? "0.0"} SLM`} />
+            <StatMini label="Frecuencia" value={`${analysis?.metrics.respiratoryRate?.toFixed(1) ?? "0.0"} rpm`} />
+            <StatMini label="Volumen esp." value={`${analysis?.metrics.expiratoryVolume?.toFixed(2) ?? "0.00"} L`} />
           </div>
         </CardContent>
       </Card>
@@ -394,6 +466,9 @@ export default function MonitoringPage() {
             color="#059669"
           />
           <GraphCard title="Flujo de aire (SLM)" dataKey="flow" data={chartData} color="#7c3aed" />
+          <GraphCard title="Flujo pico espiratorio (SLM)" dataKey="peakFlow" data={chartData} color="#ea580c" />
+          <GraphCard title="Frecuencia respiratoria (rpm)" dataKey="respRate" data={chartData} color="#0f766e" />
+          <GraphCard title="Volumen espiratorio (L)" dataKey="expVolume" data={chartData} color="#9333ea" />
         </CardContent>
       </Card>
 
@@ -414,20 +489,42 @@ export default function MonitoringPage() {
                   <div className="font-medium">{ex.title}</div>
                   <div className="text-xs text-muted-foreground">{ex.cue ?? "Ejercicio de apoyo"}</div>
                   <div className="text-xs">Duracion sugerida: {ex.durationSec}s</div>
-                  <Button
-                    size="sm"
-                    variant={applied ? "outline" : "default"}
-                    className="w-full"
-                    onClick={() => void markDoctorExercise(ex)}
-                  >
-                    {applied ? "Aplicado" : "Marcar como aplicado"}
-                  </Button>
+                  <div className="grid gap-2">
+                    <Button size="sm" variant="outline" className="w-full" onClick={() => setVideoExercise(ex)}>
+                      <Video className="h-4 w-4 mr-2" /> Ver video
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={applied ? "outline" : "default"}
+                      className="w-full"
+                      onClick={() => void markDoctorExercise(ex)}
+                    >
+                      {applied ? "Aplicado" : "Marcar como aplicado"}
+                    </Button>
+                  </div>
                 </div>
               );
             })}
           </CardContent>
         </Card>
       )}
+
+      <TrainingVideoDialog
+        exercise={videoExercise}
+        open={!!videoExercise}
+        onOpenChange={(open) => {
+          if (!open) setVideoExercise(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function StatMini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-card/50 p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="font-semibold">{value}</div>
     </div>
   );
 }

@@ -2,12 +2,18 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { connect, MqttClient } from 'mqtt';
 import { SessionService } from './session.service';
 import { GaryDeviceStatus, GaryTelemetry } from '../models/telemetry.model';
+import { TelemetryAnalysisService } from './telemetry-analysis.service';
 
-const MQTT_URL = 'mqtt://broker.hivemq.com:1883';
 const MQTT_TOPIC = 'gary/device/telemetry';
 const MQTT_STATUS_TOPIC = 'gary/device/status';
 const MQTT_CONTROL_TOPIC = 'gary/device/control';
 const SAVE_INTERVAL_MS = 60_000;
+const ANALYSIS_WINDOW_MS = 10_000;
+
+type AnalysisWindowEntry = {
+  receivedAt: number;
+  telemetry: GaryTelemetry;
+};
 
 @Injectable()
 export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
@@ -23,18 +29,23 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
     timestamp: new Date().toISOString(),
   };
   private saveTimer: NodeJS.Timeout | null = null;
+  private analysisWindow: AnalysisWindowEntry[] = [];
+  private lastAnalysisAt = 0;
 
-  constructor(private readonly sessionService: SessionService) {}
+  constructor(
+    private readonly sessionService: SessionService,
+    private readonly telemetryAnalysisService: TelemetryAnalysisService,
+  ) {}
 
   onModuleInit() {
-    this.client = connect(MQTT_URL, {
+    this.client = connect('mqtt://broker.hivemq.com:1883', {
       reconnectPeriod: 3000,
       clean: true,
       clientId: `gary-backend-${Math.random().toString(16).slice(2, 10)}`,
     });
 
     this.client.on('connect', () => {
-      this.logger.log(`MQTT conectado: ${MQTT_URL}`);
+      this.logger.log('MQTT conectado: mqtt://broker.hivemq.com:1883');
       this.client?.subscribe(MQTT_TOPIC, (err) => {
         if (err) {
           this.logger.error(`Error suscribiendo ${MQTT_TOPIC}: ${err.message}`);
@@ -57,6 +68,7 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
         const parsed = this.parseTelemetry(payload.toString('utf8'));
         if (parsed) {
           this.latestTelemetry = parsed;
+          void this.pushTelemetryForAnalysis(parsed);
         }
         return;
       }
@@ -92,6 +104,10 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
 
   getDeviceStatus() {
     return this.latestDeviceStatus;
+  }
+
+  getLatestAnalysis() {
+    return this.telemetryAnalysisService.getLatestAnalysis();
   }
 
   async publishMonitoringControl(monitoringEnabled: boolean) {
@@ -136,23 +152,42 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
           obj.lungCapacity ?? obj.lungPressureKpa ?? obj.pressure,
         );
         const airFlow = Number(obj.airFlow ?? obj.flowRate ?? obj.flow ?? obj.airflow);
+        const peakExpiratoryFlow = Number(
+          obj.peakExpiratoryFlow ?? obj.peakFlow ?? obj.peakExpFlow,
+        );
+        const respiratoryRate = Number(
+          obj.respiratoryRate ?? obj.breathRate ?? obj.respRate,
+        );
+        const expiratoryVolume = Number(
+          obj.expiratoryVolume ?? obj.exhaledVolume ?? obj.expVolume,
+        );
 
         if (
           Number.isFinite(pulse) &&
           Number.isFinite(oxygenSaturation) &&
           Number.isFinite(lungCapacity) &&
-          Number.isFinite(airFlow)
+          Number.isFinite(airFlow) &&
+          Number.isFinite(peakExpiratoryFlow) &&
+          Number.isFinite(respiratoryRate) &&
+          Number.isFinite(expiratoryVolume)
         ) {
+          const timestamp =
+            typeof obj.timestamp === 'number'
+              ? String(obj.timestamp)
+              : typeof obj.timestamp === 'string'
+                ? obj.timestamp
+                : String(Date.now());
+
           return {
             pulse,
             oxygenSaturation,
             lungCapacity,
             airFlow,
+            peakExpiratoryFlow,
+            respiratoryRate,
+            expiratoryVolume,
             state: typeof obj.state === 'string' ? obj.state : undefined,
-            timestamp:
-              typeof obj.timestamp === 'string'
-                ? obj.timestamp
-                : new Date().toISOString(),
+            timestamp,
           };
         }
       } catch {
@@ -179,6 +214,9 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
         oxygenSaturation: Math.round(this.latestTelemetry.oxygenSaturation),
         lungCapacity: this.latestTelemetry.lungCapacity,
         airFlow: this.latestTelemetry.airFlow,
+        peakExpiratoryFlow: this.latestTelemetry.peakExpiratoryFlow,
+        respiratoryRate: this.latestTelemetry.respiratoryRate,
+        expiratoryVolume: this.latestTelemetry.expiratoryVolume,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown error';
@@ -222,5 +260,22 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
   private async syncMonitoringControl() {
     const activeSession = await this.sessionService.getActiveSession();
     await this.publishMonitoringControl(Boolean(activeSession));
+  }
+
+  private async pushTelemetryForAnalysis(reading: GaryTelemetry) {
+    const now = Date.now();
+    this.analysisWindow.push({ receivedAt: now, telemetry: reading });
+    this.analysisWindow = this.analysisWindow.filter(
+      (item) => now - item.receivedAt <= ANALYSIS_WINDOW_MS,
+    );
+
+    if (now - this.lastAnalysisAt < ANALYSIS_WINDOW_MS) {
+      return;
+    }
+
+    this.lastAnalysisAt = now;
+    await this.telemetryAnalysisService.analyzeWindow(
+      this.analysisWindow.map((item) => item.telemetry),
+    );
   }
 }

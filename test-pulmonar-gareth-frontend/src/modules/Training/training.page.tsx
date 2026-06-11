@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, Clock3, PlayCircle, Wind, Waves, Gauge } from "lucide-react";
+import { Activity, Clock3, PlayCircle, Wind, Waves, Gauge, Video } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuthStore } from "@/auth/useAuth";
 import { trainingService } from "./data/training.service";
 import type { TrainingExercise } from "./training.interface";
+import { TrainingVideoDialog } from "./components/training-video-dialog";
 
 type UiExercise = TrainingExercise & { color: string };
 type BreathPhase = "inhale" | "hold" | "exhale" | "rest";
@@ -18,29 +19,38 @@ const EXERCISE_COLORS = [
 
 const FALLBACK_EXERCISES: UiExercise[] = [
   {
-    id: "force-1",
-    title: "Soplido sostenido",
-    goal: "Mejorar fuerza espiratoria",
-    durationSec: 20,
-    rounds: 5,
+    id: "video-1",
+    title: "Respiracion abdomino-diafragmatica",
+    goal: "Favorecer expansion abdominal y control de la exhalacion",
+    videoUrl: "/videos/1.mp4",
+    videoTitle: "Respiracion abdomino-diafragmatica",
+    videoDescription: "Inhala llevando el aire al abdomen y exhala de forma lenta y controlada.",
+    durationSec: 30,
+    rounds: 4,
     restSec: 20,
     level: "Basico",
     color: "from-emerald-50 to-teal-50",
   },
   {
-    id: "flow-1",
-    title: "Ritmo 4-4",
-    goal: "Mejorar flujo de aire",
-    durationSec: 16,
-    rounds: 6,
-    restSec: 15,
+    id: "video-2",
+    title: "Respiracion costal inferior",
+    goal: "Expandir la zona costal inferior durante la inspiracion",
+    videoUrl: "/videos/2.mp4",
+    videoTitle: "Respiracion costal inferior",
+    videoDescription: "Dirige el aire hacia la parte baja de las costillas y exhala sin forzar.",
+    durationSec: 30,
+    rounds: 4,
+    restSec: 20,
     level: "Basico",
     color: "from-sky-50 to-cyan-50",
   },
   {
-    id: "flow-2",
-    title: "Diafragmatica guiada",
-    goal: "Controlar respiracion",
+    id: "video-3",
+    title: "Respiracion con elevacion de brazos",
+    goal: "Coordinar inspiracion con elevacion de brazos y exhalacion al descender",
+    videoUrl: "/videos/3.mp4",
+    videoTitle: "Respiracion con elevacion de brazos",
+    videoDescription: "Eleva los brazos al inspirar y bajalos lentamente mientras exhalas.",
     durationSec: 30,
     rounds: 4,
     restSec: 25,
@@ -58,6 +68,7 @@ export default function TrainingPage() {
   const [phaseRemaining, setPhaseRemaining] = useState(4);
   const [round, setRound] = useState(1);
   const [isPaused, setIsPaused] = useState(false);
+  const [videoExercise, setVideoExercise] = useState<TrainingExercise | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -253,14 +264,19 @@ export default function TrainingPage() {
                     </div>
                   </div>
                 ) : (
-                  <Button
-                    className="w-full"
-                    variant={done ? "outline" : "default"}
-                    onClick={() => startExercise(ex.id)}
-                  >
-                    <PlayCircle className="h-4 w-4 mr-2" />
-                    {done ? "Repetir ejercicio" : "Iniciar ejercicio"}
-                  </Button>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      className="w-full"
+                      variant={done ? "outline" : "default"}
+                      onClick={() => startExercise(ex.id)}
+                    >
+                      <PlayCircle className="h-4 w-4 mr-2" />
+                      {done ? "Repetir ejercicio" : "Iniciar ejercicio"}
+                    </Button>
+                    <Button className="w-full" variant="outline" onClick={() => setVideoExercise(ex)}>
+                      <Video className="h-4 w-4 mr-2" /> Ver video
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -324,6 +340,14 @@ export default function TrainingPage() {
           </CardContent>
         </Card>
       )}
+
+      <TrainingVideoDialog
+        exercise={videoExercise}
+        open={!!videoExercise}
+        onOpenChange={(open) => {
+          if (!open) setVideoExercise(null);
+        }}
+      />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import type {
   SessionData,
   DeviceStatus,
   RealtimeTelemetry,
+  TelemetryAnalysis,
 } from "../session.interface";
 
 const BASE_URL = "/sessions";
@@ -50,6 +51,18 @@ export const sessionService = {
 
   getDeviceStatus: async (): Promise<DeviceStatus> => {
     const res = await axios.get(`${BASE_URL}/monitoring/device-status`);
+    return res.data;
+  },
+
+  getLatestAnalysis: async (): Promise<TelemetryAnalysis> => {
+    const res = await axios.get(`${BASE_URL}/monitoring/analysis`);
+    return res.data;
+  },
+
+  downloadReport: async (sessionId: string): Promise<Blob> => {
+    const res = await axios.get(`${BASE_URL}/${sessionId}/report`, {
+      responseType: "blob",
+    });
     return res.data;
   },
 };

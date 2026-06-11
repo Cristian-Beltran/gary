@@ -7,11 +7,14 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Res,
   UsePipes,
   ValidationPipe,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { SessionService } from '../services/session.service';
 import { MqttTelemetryService } from '../services/mqtt-telemetry.service';
+import { SessionReportService } from '../services/session-report.service';
 import { CreateSessionDto } from '../dtos/create-session.dto';
 import { CreateSessionDataDto } from '../dtos/create-session-data.dto';
 
@@ -21,6 +24,7 @@ export class SessionController {
   constructor(
     private readonly sessionService: SessionService,
     private readonly mqttTelemetryService: MqttTelemetryService,
+    private readonly sessionReportService: SessionReportService,
   ) {}
 
   // POST /sessions  -> crea una sesión
@@ -59,6 +63,21 @@ export class SessionController {
     return this.sessionService.findByPatient(patientId);
   }
 
+  @Get(':id/report')
+  async downloadSessionReport(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Res() response: Response,
+  ) {
+    const pdf = await this.sessionReportService.generateSessionReport(id);
+    response.setHeader('Content-Type', 'application/pdf');
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reporte-sesion-${id.slice(0, 8)}.pdf"`,
+    );
+    response.setHeader('Content-Length', String(pdf.length));
+    response.end(pdf);
+  }
+
   @Get('active')
   getActiveSession() {
     return this.sessionService.getActiveSession();
@@ -72,5 +91,10 @@ export class SessionController {
   @Get('monitoring/device-status')
   getMonitoringDeviceStatus() {
     return this.mqttTelemetryService.getDeviceStatus();
+  }
+
+  @Get('monitoring/analysis')
+  getLatestMonitoringAnalysis() {
+    return this.mqttTelemetryService.getLatestAnalysis();
   }
 }

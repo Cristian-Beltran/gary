@@ -1,5 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { sessionService } from "../data/session.service";
+import { Download } from "lucide-react";
+import { useState } from "react";
 import type { Session } from "../session.interface";
 
 type Props = {
@@ -7,6 +11,8 @@ type Props = {
 };
 
 export function SessionsTable({ sessions }: Props) {
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
   if (!sessions.length) {
     return (
       <Card>
@@ -29,6 +35,23 @@ export function SessionsTable({ sessions }: Props) {
             )
           : null;
 
+        const handleDownload = async () => {
+          setDownloadingId(s.id);
+          try {
+            const blob = await sessionService.downloadReport(s.id);
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `reporte-sesion-${s.id.slice(0, 8)}.pdf`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+          } finally {
+            setDownloadingId(null);
+          }
+        };
+
         return (
           <Card key={s.id} className="border-dotted">
             <CardHeader>
@@ -45,11 +68,20 @@ export function SessionsTable({ sessions }: Props) {
                     {s.endedAt ? "Cerrada" : "Activa"}
                   </Badge>
                   <Badge variant="secondary">{records.length} lecturas</Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleDownload()}
+                    disabled={downloadingId === s.id}
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    {downloadingId === s.id ? "Generando PDF..." : "Descargar PDF"}
+                  </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-5 text-sm">
+              <div className="grid gap-3 sm:grid-cols-7 text-sm">
                 <Stat label="Duracion" value={duration == null ? "En curso" : `${duration.toFixed(1)} min`} />
                 <Stat
                   label="Pulso prom"
@@ -67,6 +99,18 @@ export function SessionsTable({ sessions }: Props) {
                   label="Flujo prom"
                   value={`${avg(records.map((r) => r.airFlow)).toFixed(1)} SLM`}
                 />
+                <Stat
+                  label="Flujo pico prom"
+                  value={`${avg(records.map((r) => r.peakExpiratoryFlow)).toFixed(1)} SLM`}
+                />
+                <Stat
+                  label="Freq. resp."
+                  value={`${avg(records.map((r) => r.respiratoryRate)).toFixed(1)} rpm`}
+                />
+                <Stat
+                  label="Vol. esp."
+                  value={`${avg(records.map((r) => r.expiratoryVolume)).toFixed(2)} L`}
+                />
               </div>
 
               <div className="overflow-auto rounded-md border">
@@ -78,6 +122,9 @@ export function SessionsTable({ sessions }: Props) {
                         <th className="text-left p-2">SpO2</th>
                         <th className="text-left p-2">Presion respiratoria</th>
                         <th className="text-left p-2">Flujo de aire</th>
+                        <th className="text-left p-2">Flujo pico esp.</th>
+                        <th className="text-left p-2">Freq. resp.</th>
+                        <th className="text-left p-2">Volumen esp.</th>
                       </tr>
                     </thead>
                   <tbody>
@@ -88,6 +135,9 @@ export function SessionsTable({ sessions }: Props) {
                         <td className="p-2">{r.oxygenSaturation}</td>
                         <td className="p-2">{r.lungCapacity.toFixed(2)} kPa</td>
                         <td className="p-2">{r.airFlow.toFixed(1)} SLM</td>
+                        <td className="p-2">{r.peakExpiratoryFlow.toFixed(1)} SLM</td>
+                        <td className="p-2">{r.respiratoryRate.toFixed(1)} rpm</td>
+                        <td className="p-2">{r.expiratoryVolume.toFixed(2)} L</td>
                       </tr>
                     ))}
                   </tbody>
