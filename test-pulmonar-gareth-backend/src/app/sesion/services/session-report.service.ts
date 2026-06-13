@@ -7,6 +7,11 @@ import { SessionService } from './session.service';
 
 @Injectable()
 export class SessionReportService {
+  private static readonly A4_WIDTH = 595.28;
+  private static readonly PAGE_MARGIN_X = 28;
+  private static readonly CONTENT_WIDTH =
+    SessionReportService.A4_WIDTH - SessionReportService.PAGE_MARGIN_X * 2;
+
   constructor(
     private readonly sessionService: SessionService,
     private readonly pdfService: PdfService,
@@ -42,7 +47,12 @@ export class SessionReportService {
 
     return {
       pageSize: 'A4',
-      pageMargins: [28, 28, 28, 36],
+      pageMargins: [
+        SessionReportService.PAGE_MARGIN_X,
+        28,
+        SessionReportService.PAGE_MARGIN_X,
+        36,
+      ],
       footer: (currentPage, pageCount) => ({
         margin: [28, 0, 28, 12],
         columns: [
@@ -95,11 +105,21 @@ export class SessionReportService {
         {
           columns: [
             this.buildInfoCard('Paciente', patientName, '#eff6ff'),
-            this.buildInfoCard('Inicio', this.formatDateTime(startedAt), '#f0fdf4'),
-            this.buildInfoCard('Fin', endedAt ? this.formatDateTime(endedAt) : 'Sesion activa', '#fff7ed'),
+            this.buildInfoCard(
+              'Inicio',
+              this.formatDateTime(startedAt),
+              '#f0fdf4',
+            ),
+            this.buildInfoCard(
+              'Fin',
+              endedAt ? this.formatDateTime(endedAt) : 'Sesion activa',
+              '#fff7ed',
+            ),
             this.buildInfoCard(
               'Duracion',
-              durationMin == null ? 'En curso' : `${durationMin.toFixed(1)} min`,
+              durationMin == null
+                ? 'En curso'
+                : `${durationMin.toFixed(1)} min`,
               '#faf5ff',
             ),
           ],
@@ -112,19 +132,47 @@ export class SessionReportService {
         },
         {
           columns: [
-            this.buildMetricCard('Pulso prom.', `${summary.avgPulse.toFixed(1)} bpm`, '#fee2e2'),
-            this.buildMetricCard('SpO2 prom.', `${summary.avgSpo2.toFixed(1)} %`, '#dbeafe'),
-            this.buildMetricCard('Presion prom.', `${summary.avgPressure.toFixed(2)} kPa`, '#dcfce7'),
-            this.buildMetricCard('Flujo prom.', `${summary.avgFlow.toFixed(1)} SLM`, '#ede9fe'),
+            this.buildMetricCard(
+              'Pulso prom.',
+              `${summary.avgPulse.toFixed(1)} bpm`,
+              '#fee2e2',
+            ),
+            this.buildMetricCard(
+              'SpO2 prom.',
+              `${summary.avgSpo2.toFixed(1)} %`,
+              '#dbeafe',
+            ),
+            this.buildMetricCard(
+              'Presion prom.',
+              `${summary.avgPressure.toFixed(2)} kPa`,
+              '#dcfce7',
+            ),
+            this.buildMetricCard(
+              'Flujo prom.',
+              `${summary.avgFlow.toFixed(1)} SLM`,
+              '#ede9fe',
+            ),
           ],
           columnGap: 10,
         },
         { text: ' ' },
         {
           columns: [
-            this.buildMetricCard('Flujo pico max.', `${summary.maxPeakFlow.toFixed(1)} SLM`, '#ffedd5'),
-            this.buildMetricCard('Freq. resp. prom.', `${summary.avgRespiratoryRate.toFixed(1)} rpm`, '#ccfbf1'),
-            this.buildMetricCard('Vol. esp. max.', `${summary.maxExpiratoryVolume.toFixed(2)} L`, '#f3e8ff'),
+            this.buildMetricCard(
+              'Flujo pico max.',
+              `${summary.maxPeakFlow.toFixed(1)} SLM`,
+              '#ffedd5',
+            ),
+            this.buildMetricCard(
+              'Freq. resp. prom.',
+              `${summary.avgRespiratoryRate.toFixed(1)} rpm`,
+              '#ccfbf1',
+            ),
+            this.buildMetricCard(
+              'Vol. esp. max.',
+              `${summary.maxExpiratoryVolume.toFixed(2)} L`,
+              '#f3e8ff',
+            ),
             this.buildMetricCard('Lecturas', `${records.length}`, '#f8fafc'),
           ],
           columnGap: 10,
@@ -134,31 +182,19 @@ export class SessionReportService {
           text: 'Graficas de la sesion',
           style: 'sectionTitle',
         },
-        this.buildChartSection(
-          'Pulso y SpO2',
-          records,
-          [
-            { key: 'pulse', color: '#ef4444' },
-            { key: 'oxygenSaturation', color: '#2563eb' },
-          ],
-        ),
-        this.buildChartSection(
-          'Presion y flujo de aire',
-          records,
-          [
-            { key: 'lungCapacity', color: '#059669' },
-            { key: 'airFlow', color: '#7c3aed' },
-          ],
-        ),
-        this.buildChartSection(
-          'Metricas respiratorias derivadas',
-          records,
-          [
-            { key: 'peakExpiratoryFlow', color: '#ea580c' },
-            { key: 'respiratoryRate', color: '#0f766e' },
-            { key: 'expiratoryVolume', color: '#9333ea' },
-          ],
-        ),
+        this.buildChartSection('Pulso y SpO2', records, [
+          { key: 'pulse', color: '#ef4444' },
+          { key: 'oxygenSaturation', color: '#2563eb' },
+        ]),
+        this.buildChartSection('Presion y flujo de aire', records, [
+          { key: 'lungCapacity', color: '#059669' },
+          { key: 'airFlow', color: '#7c3aed' },
+        ]),
+        this.buildChartSection('Metricas respiratorias derivadas', records, [
+          { key: 'peakExpiratoryFlow', color: '#ea580c' },
+          { key: 'respiratoryRate', color: '#0f766e' },
+          { key: 'expiratoryVolume', color: '#9333ea' },
+        ]),
         {
           text: 'Detalle de lecturas',
           style: 'sectionTitle',
@@ -170,13 +206,28 @@ export class SessionReportService {
         eyebrow: { fontSize: 10, bold: true, color: '#0f766e' },
         title: { fontSize: 22, bold: true, color: '#0f172a' },
         subtitle: { fontSize: 10, color: '#475569' },
-        sectionTitle: { fontSize: 14, bold: true, color: '#0f172a', margin: [0, 6, 0, 8] },
+        sectionTitle: {
+          fontSize: 14,
+          bold: true,
+          color: '#0f172a',
+          margin: [0, 6, 0, 8],
+        },
         cardLabel: { fontSize: 9, bold: true, color: '#475569' },
         cardValue: { fontSize: 12, bold: true, color: '#0f172a' },
         metricValue: { fontSize: 16, bold: true, color: '#020617' },
-        chartTitle: { fontSize: 11, bold: true, color: '#0f172a', margin: [0, 0, 0, 6] },
+        chartTitle: {
+          fontSize: 11,
+          bold: true,
+          color: '#0f172a',
+          margin: [0, 0, 0, 6],
+        },
         chartLegend: { fontSize: 8, color: '#475569' },
-        sessionIdCard: { fontSize: 10, color: '#ffffff', alignment: 'center', bold: true },
+        sessionIdCard: {
+          fontSize: 10,
+          color: '#ffffff',
+          alignment: 'center',
+          bold: true,
+        },
         tableHeader: { fontSize: 9, bold: true, color: '#0f172a' },
         tableCell: { fontSize: 8, color: '#0f172a' },
       },
@@ -189,7 +240,9 @@ export class SessionReportService {
 
   private buildSummary(records: SessionData[]) {
     const avg = (values: number[]) =>
-      values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+      values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : 0;
     const max = (values: number[]) => (values.length ? Math.max(...values) : 0);
 
     return {
@@ -199,7 +252,9 @@ export class SessionReportService {
       avgFlow: avg(records.map((record) => record.airFlow)),
       avgRespiratoryRate: avg(records.map((record) => record.respiratoryRate)),
       maxPeakFlow: max(records.map((record) => record.peakExpiratoryFlow)),
-      maxExpiratoryVolume: max(records.map((record) => record.expiratoryVolume)),
+      maxExpiratoryVolume: max(
+        records.map((record) => record.expiratoryVolume),
+      ),
     };
   }
 
@@ -208,7 +263,16 @@ export class SessionReportService {
       width: '*',
       table: {
         widths: ['*'],
-        body: [[{ stack: [{ text: label, style: 'cardLabel' }, { text: value, style: 'cardValue' }] }]],
+        body: [
+          [
+            {
+              stack: [
+                { text: label, style: 'cardLabel' },
+                { text: value, style: 'cardValue' },
+              ],
+            },
+          ],
+        ],
       },
       layout: {
         hLineWidth: () => 0,
@@ -222,12 +286,25 @@ export class SessionReportService {
     };
   }
 
-  private buildMetricCard(label: string, value: string, fillColor: string): any {
+  private buildMetricCard(
+    label: string,
+    value: string,
+    fillColor: string,
+  ): any {
     return {
       width: '*',
       table: {
         widths: ['*'],
-        body: [[{ stack: [{ text: label, style: 'cardLabel' }, { text: value, style: 'metricValue' }] }]],
+        body: [
+          [
+            {
+              stack: [
+                { text: label, style: 'cardLabel' },
+                { text: value, style: 'metricValue' },
+              ],
+            },
+          ],
+        ],
       },
       layout: {
         hLineWidth: () => 0,
@@ -246,22 +323,60 @@ export class SessionReportService {
     records: SessionData[],
     series: Array<{ key: keyof SessionData; color: string }>,
   ): any {
-    const chartWidth = 740;
+    const chartWidth = SessionReportService.CONTENT_WIDTH;
     const chartHeight = 150;
     const left = 24;
     const top = 12;
-    const usableWidth = chartWidth - left - 16;
-    const usableHeight = chartHeight - top - 26;
-    const values = records.flatMap((record) =>
-      series.map((item) => Number(record[item.key] ?? 0)),
-    );
+    const right = 16;
+    const bottom = 26;
+    const usableWidth = chartWidth - left - right;
+    const usableHeight = chartHeight - top - bottom;
+    const values = records
+      .flatMap((record) => series.map((item) => Number(record[item.key] ?? 0)))
+      .filter((value) => Number.isFinite(value));
+    const minValue = Math.min(...values, 0);
     const maxValue = Math.max(...values, 1);
+    const valueRange = maxValue - minValue || 1;
     const count = Math.max(records.length - 1, 1);
+    const bottomY = top + usableHeight;
+    const clamp = (value: number, min: number, max: number) =>
+      Math.max(min, Math.min(max, value));
+    const mapY = (value: number) =>
+      clamp(
+        bottomY - ((value - minValue) / valueRange) * usableHeight,
+        top,
+        bottomY,
+      );
 
     const canvas = [
-      { type: 'rect', x: 0, y: 0, w: chartWidth, h: chartHeight, r: 8, lineColor: '#e2e8f0', color: '#ffffff' },
-      { type: 'line', x1: left, y1: top, x2: left, y2: top + usableHeight, lineColor: '#cbd5e1', lineWidth: 1 },
-      { type: 'line', x1: left, y1: top + usableHeight, x2: left + usableWidth, y2: top + usableHeight, lineColor: '#cbd5e1', lineWidth: 1 },
+      {
+        type: 'rect',
+        x: 0,
+        y: 0,
+        w: chartWidth,
+        h: chartHeight,
+        r: 8,
+        lineColor: '#e2e8f0',
+        color: '#ffffff',
+      },
+      {
+        type: 'line',
+        x1: left,
+        y1: top,
+        x2: left,
+        y2: bottomY,
+        lineColor: '#cbd5e1',
+        lineWidth: 1,
+      },
+      {
+        type: 'line',
+        x1: left,
+        y1: bottomY,
+        x2: left + usableWidth,
+        y2: bottomY,
+        lineColor: '#cbd5e1',
+        lineWidth: 1,
+      },
     ];
 
     for (let index = 1; index <= 3; index++) {
@@ -277,6 +392,19 @@ export class SessionReportService {
       });
     }
 
+    if (minValue < 0 && maxValue > 0) {
+      const zeroY = mapY(0);
+      canvas.push({
+        type: 'line',
+        x1: left,
+        y1: zeroY,
+        x2: left + usableWidth,
+        y2: zeroY,
+        lineColor: '#94a3b8',
+        lineWidth: 0.8,
+      });
+    }
+
     series.forEach((item) => {
       if (records.length < 2) {
         return;
@@ -287,8 +415,8 @@ export class SessionReportService {
         const next = Number(records[index + 1][item.key] ?? 0);
         const x1 = left + (usableWidth * index) / count;
         const x2 = left + (usableWidth * (index + 1)) / count;
-        const y1 = top + usableHeight - (current / maxValue) * usableHeight;
-        const y2 = top + usableHeight - (next / maxValue) * usableHeight;
+        const y1 = mapY(current);
+        const y2 = mapY(next);
         canvas.push({
           type: 'line',
           x1,
@@ -305,15 +433,28 @@ export class SessionReportService {
       {
         width: 'auto',
         canvas: [
-          { type: 'line', x1: 0, y1: 3, x2: 16, y2: 3, lineColor: item.color, lineWidth: 2 },
+          {
+            type: 'line',
+            x1: 0,
+            y1: 3,
+            x2: 16,
+            y2: 3,
+            lineColor: item.color,
+            lineWidth: 2,
+          },
         ],
         margin: [0, 4, 6, 0],
       },
-      { width: '*', text: this.seriesLabel(String(item.key)), style: 'chartLegend' },
+      {
+        width: '*',
+        text: this.seriesLabel(String(item.key)),
+        style: 'chartLegend',
+      },
     ]);
 
     return {
       margin: [0, 0, 0, 12],
+      unbreakable: true,
       stack: [
         { text: title, style: 'chartTitle' },
         {
@@ -337,20 +478,30 @@ export class SessionReportService {
         'Pico esp.',
         'Freq. resp.',
         'Vol. esp.',
-      ].map((label) => ({ text: label, style: 'tableHeader', fillColor: '#e2e8f0' })),
+      ].map((label) => ({
+        text: label,
+        style: 'tableHeader',
+        fillColor: '#e2e8f0',
+      })),
     ];
 
     records.forEach((record, index) => {
-      body.push([
-        this.formatTime(record.recordedAt),
-        `${record.pulse}`,
-        `${record.oxygenSaturation}`,
-        `${record.lungCapacity.toFixed(2)} kPa`,
-        `${record.airFlow.toFixed(1)} SLM`,
-        `${record.peakExpiratoryFlow.toFixed(1)} SLM`,
-        `${record.respiratoryRate.toFixed(1)} rpm`,
-        `${record.expiratoryVolume.toFixed(2)} L`,
-      ].map((value) => ({ text: value, style: 'tableCell', fillColor: index % 2 === 0 ? '#ffffff' : '#f8fafc' })));
+      body.push(
+        [
+          this.formatTime(record.recordedAt),
+          `${record.pulse}`,
+          `${record.oxygenSaturation}`,
+          `${record.lungCapacity.toFixed(2)} kPa`,
+          `${record.airFlow.toFixed(1)} SLM`,
+          `${record.peakExpiratoryFlow.toFixed(1)} SLM`,
+          `${record.respiratoryRate.toFixed(1)} rpm`,
+          `${record.expiratoryVolume.toFixed(2)} L`,
+        ].map((value) => ({
+          text: value,
+          style: 'tableCell',
+          fillColor: index % 2 === 0 ? '#ffffff' : '#f8fafc',
+        })),
+      );
     });
 
     return {
@@ -366,8 +517,8 @@ export class SessionReportService {
         vLineWidth: () => 0.7,
         paddingTop: () => 5,
         paddingBottom: () => 5,
-        paddingLeft: () => 6,
-        paddingRight: () => 6,
+        paddingLeft: () => 4,
+        paddingRight: () => 4,
       },
     };
   }
