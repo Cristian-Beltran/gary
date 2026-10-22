@@ -15,9 +15,14 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
+  const corsOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173,https://gary-project.netlify.app')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''));
   app.enableCors({
-    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:5173,https://gary-project.netlify.app')
-      .split(',').map((origin) => origin.trim()),
+    origin: (origin, callback) => {
+      if (!origin || corsOrigins.includes(origin.replace(/\/$/, ''))) return callback(null, true);
+      return callback(new Error(`Origen no autorizado por CORS: ${origin}`), false);
+    },
     credentials: true,
   });
   app.useGlobalPipes(
