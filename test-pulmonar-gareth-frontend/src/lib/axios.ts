@@ -3,7 +3,7 @@ import axios from "axios";
 import Cookies from "js-cookie";
 //import Cookies from "js-cookie";
 
-const API_URL = "http://localhost:3000";
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 const instance = axios.create({
   baseURL: API_URL,
   headers: {
