@@ -1,5 +1,6 @@
 export interface CreateSessionDto {
   patientId: string;
+  exerciseId?: string;
 }
 
 export interface CreateSessionDataDto {
@@ -34,6 +35,13 @@ export interface Session {
   };
   startedAt: string;
   endedAt?: string | null;
+  status?: "active" | "completed" | "error";
+  durationSeconds?: number | null;
+  exercise?: {
+    id: string;
+    title: string;
+    level?: string;
+  } | null;
   records?: SessionData[];
 }
 
@@ -47,6 +55,8 @@ export interface RealtimeTelemetry {
   expiratoryVolume: number;
   state?: string;
   timestamp: string;
+  receivedAt?: string;
+  stale?: boolean;
 }
 
 export interface TelemetryAnalysis {
@@ -79,4 +89,5 @@ export interface DeviceStatus {
   ip?: string;
   rssi?: number;
   timestamp: string;
+  lastCommandAck?: { commandId?: string; accepted: boolean; receivedAt: string };
 }

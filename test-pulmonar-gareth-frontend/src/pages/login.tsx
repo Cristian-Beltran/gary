@@ -70,21 +70,20 @@ import {
   EyeOff,
   Loader2,
   AlertCircle,
-  Mail,
+  IdCard,
   Lock,
   ShieldCheck,
   Activity,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "@/auth/useAuth";
 
 const formSchema = z.object({
-  email: z.string().email({
-    message: "Por favor ingrese un correo electrónico válido.",
-  }),
+  ci: z.string().min(3, { message: "Ingrese su número de CI." }),
   password: z.string().min(6, {
     message: "La contraseña debe tener al menos 6 caracteres.",
   }),
+  role: z.enum(["patient", "doctor"]),
 });
 
 export default function LoginPage() {
@@ -95,18 +94,18 @@ export default function LoginPage() {
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
-    defaultValues: { email: "", password: "" },
+    defaultValues: { ci: "", password: "", role: "patient" },
     mode: "onSubmit",
   });
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     setServerError("");
     try {
-      await login({ email: values.email, password: values.password });
+      await login(values);
       navigate("/");
     } catch (e) {
       if (e) {
-        form.setError("email", { type: "server", message: " " });
+        form.setError("ci", { type: "server", message: " " });
         form.setError("password", { type: "server", message: " " });
         setServerError("Credenciales inválidas o sesión no autorizada.");
       }
@@ -171,19 +170,35 @@ export default function LoginPage() {
 
                   <FormField
                     control={form.control}
-                    name="email"
+                    name="role"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-foreground/80 font-medium">Ingresar como</FormLabel>
+                        <FormControl>
+                          <select {...field} className="flex h-12 w-full rounded-lg border border-input/60 bg-background px-3 text-sm">
+                            <option value="patient">Paciente</option>
+                            <option value="doctor">Doctor</option>
+                          </select>
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="ci"
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-foreground/80 font-medium">
-                          Correo electrónico
+                          Número de CI
                         </FormLabel>
                         <FormControl>
                           <div className="relative">
-                            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <IdCard className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input
-                              placeholder="admin@pulmo.app"
+                              placeholder="Ej. 1234567"
                               className="pl-10 h-12 rounded-lg border-input/60 focus-visible:ring-2 focus-visible:ring-primary/40"
-                              autoComplete="email"
+                              autoComplete="username"
                               {...field}
                             />
                           </div>
@@ -256,6 +271,9 @@ export default function LoginPage() {
                       "Iniciar sesión"
                     )}
                   </Button>
+                  <p className="text-center text-sm text-muted-foreground">
+                    ¿No tienes cuenta? <Link to="/register" className="text-primary underline">Crear cuenta</Link>
+                  </p>
 
                   <div className="text-xs text-muted-foreground text-center">
                     Al continuar, aceptas nuestras políticas de privacidad.

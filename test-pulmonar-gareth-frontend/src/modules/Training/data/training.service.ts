@@ -1,6 +1,7 @@
 import axios from "@/lib/axios";
 import type {
   CreateTrainingLogDto,
+  ExerciseInput,
   TrainingExercise,
   TrainingLog,
 } from "../training.interface";
@@ -17,6 +18,8 @@ export const trainingService = {
     const res = await axios.get(`${BASE_URL}/doctor-exercises`);
     return res.data;
   },
+  createExercise: async (payload: ExerciseInput): Promise<TrainingExercise> => (await axios.post(`${BASE_URL}/exercises`, payload)).data,
+  updateExercise: async (id: string, payload: Partial<ExerciseInput>): Promise<TrainingExercise> => (await axios.patch(`${BASE_URL}/exercises/${id}`, payload)).data,
 
   createLog: async (payload: CreateTrainingLogDto): Promise<TrainingLog> => {
     const res = await axios.post(`${BASE_URL}/logs`, payload);

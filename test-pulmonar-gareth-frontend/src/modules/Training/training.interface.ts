@@ -10,6 +10,17 @@ export interface TrainingExercise {
   rounds?: number;
   restSec?: number;
   level?: string;
+  description?: string;
+  instructions?: string;
+  active?: boolean;
+}
+
+export interface ExerciseInput {
+  title: string;
+  description: string;
+  instructions: string;
+  level: string;
+  active?: boolean;
 }
 
 export interface CreateTrainingLogDto {

@@ -175,6 +175,11 @@ function ClinicianDashboard({ user }: { user: Profile | null }) {
           value={deviceStatus?.online ? "Conectado" : "Desconectado"}
           icon={deviceStatus?.online ? <Wifi className="h-4 w-4" /> : <WifiOff className="h-4 w-4" />}
         />
+        <InfoCard
+          title="Último comando"
+          value={deviceStatus?.lastCommandAck ? (deviceStatus.lastCommandAck.accepted ? "Confirmado" : "Rechazado") : "Sin confirmación"}
+          icon={<Activity className="h-4 w-4" />}
+        />
       </div>
 
       <Card className="bg-gradient-to-r from-sky-50 to-emerald-50 border-sky-200/70">

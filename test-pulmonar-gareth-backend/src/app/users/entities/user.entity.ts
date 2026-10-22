@@ -5,7 +5,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
-  OneToMany,
+  Index,
 } from 'typeorm';
 import { UserType } from '../enums/user-type';
 import { Status } from '../../../context/shared/models/active.model';
@@ -15,9 +15,23 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column({ nullable: true })
   fullname: string;
 
+  @Column({ nullable: true })
+  firstName: string;
+
+  @Column({ nullable: true })
+  lastName: string;
+
+  @Index({ unique: true })
+  @Column({ nullable: true })
+  ci: string;
+
+  @Column({ nullable: true })
+  phone: string;
+
+  @Index({ unique: true })
   @Column()
   email: string;
 

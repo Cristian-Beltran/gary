@@ -2,17 +2,23 @@ import { createBrowserRouter } from "react-router-dom";
 import DashboardLayout from "./layouts/dashboard";
 import DashboardPage from "./modules/Dashboard/dashboard-page";
 import LoginPage from "./pages/login";
+import RegisterPage from "./pages/register";
 import NotFoundPage from "./pages/not-found";
 import MonitoringPage from "./modules/Monitoring/monitoring";
 import DoctorsPage from "./modules/Doctors/doctors";
+import MyDoctorsPage from "./modules/Doctors/my-doctors";
+import ProfilePage from "./modules/Profile/profile.page";
+import MyPatientsPage from "./modules/Patient/my-patients";
 import { AuthProvider } from "./auth/ProtectedRoute";
 import PatientPage from "./modules/Patient/patient";
 import SessionPage from "./modules/Session/session.page";
 import TrainingPage from "./modules/Training/training.page";
+import ExerciseAdminPage from "./modules/Training/exercise-admin.page";
 import { RequireRole } from "./auth/RequireRole";
 
 export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
+  { path: "/register", element: <RegisterPage /> },
   {
     path: "/",
     element: (
@@ -22,10 +28,11 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <DashboardPage /> },
+      { path: "profile", element: <RequireRole allow={["doctor", "patient"]}><ProfilePage /></RequireRole> },
       {
         path: "monitoring",
         element: (
-          <RequireRole allow={["doctor"]}>
+          <RequireRole allow={["doctor", "patient"]}>
             <MonitoringPage />
           </RequireRole>
         ),
@@ -38,6 +45,8 @@ export const router = createBrowserRouter([
           </RequireRole>
         ),
       },
+      { path: "my-doctors", element: <RequireRole allow={["patient"]}><MyDoctorsPage /></RequireRole> },
+      { path: "my-patients", element: <RequireRole allow={["doctor"]}><MyPatientsPage /></RequireRole> },
       {
         path: "patients",
         element: (
@@ -62,6 +71,7 @@ export const router = createBrowserRouter([
           </RequireRole>
         ),
       },
+      { path: "exercise-admin", element: <RequireRole allow={["doctor"]}><ExerciseAdminPage /></RequireRole> },
       // routes
     ],
   },

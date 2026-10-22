@@ -3,13 +3,23 @@ export type UserType = "patient" | "doctor";
 export interface Profile {
   id: string;
   fullname: string;
+  firstName?: string;
+  lastName?: string;
+  ci?: string;
+  phone?: string;
   email: string;
   type: UserType;
 }
 
 export interface LoginDto {
-  email: string;
+  ci: string;
   password: string;
+  role: UserType;
+}
+
+export interface RegisterDto {
+  firstName: string; lastName: string; ci: string; phone: string;
+  email: string; password: string; role: UserType;
 }
 
 export interface AuthResponse {

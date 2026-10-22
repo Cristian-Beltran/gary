@@ -4,6 +4,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from 'src/app/users/entities/user.entity';
+import { Patient } from 'src/app/users/entities/patient.entity';
+import { Doctor } from 'src/app/users/entities/doctor.entity';
 import config from '../shared/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -12,7 +14,7 @@ import { LocalStragegy } from './strategies/local.strategy';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User]),
+    TypeOrmModule.forFeature([User, Patient, Doctor]),
     PassportModule,
     JwtModule.registerAsync({
       inject: [config.KEY],

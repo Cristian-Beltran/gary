@@ -8,6 +8,8 @@ export interface GaryTelemetry {
   expiratoryVolume: number;
   state?: string;
   timestamp: string;
+  receivedAt?: string;
+  stale?: boolean;
 }
 
 export interface GaryTelemetryAnalysis {
@@ -40,4 +42,5 @@ export interface GaryDeviceStatus {
   ip?: string;
   rssi?: number;
   timestamp: string;
+  lastCommandAck?: { commandId?: string; accepted: boolean; receivedAt: string };
 }

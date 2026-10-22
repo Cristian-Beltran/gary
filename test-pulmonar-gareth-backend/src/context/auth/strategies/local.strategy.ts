@@ -7,15 +7,13 @@ import { AuthService } from '../auth.service';
 export class LocalStragegy extends PassportStrategy(Strategy, 'local') {
   constructor(private authService: AuthService) {
     super({
-      usernameField: 'email',
+      usernameField: 'ci',
       passwordField: 'password',
+      passReqToCallback: true,
     });
   }
-  async validate(email: string, password: string) {
-    const user = await this.authService.login({
-      email,
-      password,
-    });
+  async validate(request: { body: { role?: string } }, ci: string, password: string) {
+    const user = await this.authService.login({ ci, password, role: request.body.role as never });
     if (!user) {
       throw new UnauthorizedException();
     }

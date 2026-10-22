@@ -1,13 +1,13 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit, Inject } from '@nestjs/common';
 import { connect, MqttClient } from 'mqtt';
+import { ConfigType } from '@nestjs/config';
+import config from 'src/context/shared/config';
 import { SessionService } from './session.service';
 import { GaryDeviceStatus, GaryTelemetry } from '../models/telemetry.model';
 import { TelemetryAnalysisService } from './telemetry-analysis.service';
 
-const MQTT_TOPIC = 'gary/device/telemetry';
-const MQTT_STATUS_TOPIC = 'gary/device/status';
-const MQTT_CONTROL_TOPIC = 'gary/device/control';
 const SAVE_INTERVAL_MS = 60_000;
+const TELEMETRY_STALE_MS = 10_000;
 const ANALYSIS_WINDOW_MS = 10_000;
 
 type AnalysisWindowEntry = {
@@ -20,6 +20,7 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(MqttTelemetryService.name);
   private client: MqttClient | null = null;
   private latestTelemetry: GaryTelemetry | null = null;
+  private lastTelemetryReceivedAt = 0;
   private latestDeviceStatus: GaryDeviceStatus = {
     online: false,
     mqttConnected: false,
@@ -31,54 +32,73 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
   private saveTimer: NodeJS.Timeout | null = null;
   private analysisWindow: AnalysisWindowEntry[] = [];
   private lastAnalysisAt = 0;
+  private readonly telemetryTopic: string;
+  private readonly statusTopic: string;
+  private readonly commandTopic: string;
+  private readonly ackTopic: string;
 
   constructor(
     private readonly sessionService: SessionService,
     private readonly telemetryAnalysisService: TelemetryAnalysisService,
-  ) {}
+    @Inject(config.KEY) private readonly appConfig: ConfigType<typeof config>,
+  ) {
+    const root = appConfig.mqtt.topicRoot;
+    const id = appConfig.mqtt.deviceId;
+    this.telemetryTopic = `${root}/device/${id}/telemetry`;
+    this.statusTopic = `${root}/device/${id}/status`;
+    this.commandTopic = `${root}/device/${id}/cmd`;
+    this.ackTopic = `${root}/device/${id}/cmd/ack`;
+  }
 
   onModuleInit() {
-    this.client = connect('mqtt://broker.hivemq.com:1883', {
+    const { url, user, password } = this.appConfig.mqtt;
+    this.client = connect(url, {
       reconnectPeriod: 3000,
       clean: true,
       clientId: `gary-backend-${Math.random().toString(16).slice(2, 10)}`,
+      ...(user ? { username: user, password } : {}),
     });
 
     this.client.on('connect', () => {
-      this.logger.log('MQTT conectado: mqtt://broker.hivemq.com:1883');
-      this.client?.subscribe(MQTT_TOPIC, (err) => {
+      this.logger.log(`MQTT conectado: ${url}`);
+      this.client?.subscribe(this.telemetryTopic, (err) => {
         if (err) {
-          this.logger.error(`Error suscribiendo ${MQTT_TOPIC}: ${err.message}`);
+          this.logger.error(`Error suscribiendo ${this.telemetryTopic}: ${err.message}`);
           return;
         }
-        this.logger.log(`Suscrito a ${MQTT_TOPIC}`);
+        this.logger.log(`Suscrito a ${this.telemetryTopic}`);
       });
-      this.client?.subscribe(MQTT_STATUS_TOPIC, (err) => {
+      this.client?.subscribe(this.statusTopic, (err) => {
         if (err) {
-          this.logger.error(`Error suscribiendo ${MQTT_STATUS_TOPIC}: ${err.message}`);
+          this.logger.error(`Error suscribiendo ${this.statusTopic}: ${err.message}`);
           return;
         }
-        this.logger.log(`Suscrito a ${MQTT_STATUS_TOPIC}`);
+        this.logger.log(`Suscrito a ${this.statusTopic}`);
+      });
+      this.client?.subscribe(this.ackTopic, (err) => {
+        if (err) this.logger.error(`Error suscribiendo ${this.ackTopic}: ${err.message}`);
       });
       void this.syncMonitoringControl();
     });
 
     this.client.on('message', (topic, payload) => {
-      if (topic === MQTT_TOPIC) {
+      if (topic === this.telemetryTopic) {
         const parsed = this.parseTelemetry(payload.toString('utf8'));
         if (parsed) {
-          this.latestTelemetry = parsed;
+          this.lastTelemetryReceivedAt = Date.now();
+          this.latestTelemetry = { ...parsed, receivedAt: new Date(this.lastTelemetryReceivedAt).toISOString(), stale: false };
           void this.pushTelemetryForAnalysis(parsed);
         }
         return;
       }
 
-      if (topic === MQTT_STATUS_TOPIC) {
+      if (topic === this.statusTopic) {
         const parsed = this.parseDeviceStatus(payload.toString('utf8'));
         if (parsed) {
           this.latestDeviceStatus = parsed;
         }
       }
+      if (topic === this.ackTopic) this.parseCommandAck(payload.toString('utf8'));
     });
 
     this.client.on('error', (err) => {
@@ -99,7 +119,8 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
   }
 
   getLatestTelemetry() {
-    return this.latestTelemetry;
+    if (!this.latestTelemetry) return null;
+    return { ...this.latestTelemetry, stale: Date.now() - this.lastTelemetryReceivedAt > TELEMETRY_STALE_MS };
   }
 
   getDeviceStatus() {
@@ -116,11 +137,11 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    const payload = JSON.stringify({ monitoringEnabled });
+    const payload = JSON.stringify({ command: monitoringEnabled ? 'START_MEASUREMENT' : 'STOP_MEASUREMENT', commandId: crypto.randomUUID(), monitoringEnabled });
     return await new Promise<boolean>((resolve) => {
-      this.client?.publish(MQTT_CONTROL_TOPIC, payload, { qos: 1, retain: true }, (err) => {
+      this.client?.publish(this.commandTopic, payload, { qos: 1, retain: false }, (err) => {
         if (err) {
-          this.logger.error(`Error publicando ${MQTT_CONTROL_TOPIC}: ${err.message}`);
+          this.logger.error(`Error publicando ${this.commandTopic}: ${err.message}`);
           resolve(false);
           return;
         }
@@ -254,6 +275,24 @@ export class MqttTelemetryService implements OnModuleInit, OnModuleDestroy {
       };
     } catch {
       return null;
+    }
+  }
+
+  private parseCommandAck(raw: string) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const accepted = Boolean(parsed.accepted);
+      this.latestDeviceStatus = {
+        ...this.latestDeviceStatus,
+        lastCommandAck: {
+          commandId: typeof parsed.commandId === 'string' ? parsed.commandId : undefined,
+          accepted,
+          receivedAt: new Date().toISOString(),
+        },
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      this.logger.warn(`ACK MQTT inválido: ${raw}`);
     }
   }
 

@@ -8,6 +8,8 @@ import {
   Req,
   UnauthorizedException,
   UseGuards,
+  UsePipes,
+  ValidationPipe,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
@@ -23,6 +25,7 @@ import { User } from 'src/app/users/entities/user.entity';
 import { JwtAuthGuard } from '../shared/guards/jwt-auth.guard';
 import { PayloadToken } from '../shared/models/token.model';
 import { AuthService } from './auth.service';
+import { RegisterDto } from './dtos/register.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -31,6 +34,12 @@ export class AuthController {
     private authService: AuthService,
     private readonly configService: ConfigService,
   ) {}
+
+  @Post('register')
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
+  }
 
   @UseGuards(AuthGuard('local'))
   @Post('login')

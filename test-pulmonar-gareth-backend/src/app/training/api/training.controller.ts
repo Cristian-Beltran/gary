@@ -1,6 +1,11 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { CreateTrainingLogDto } from '../dtos/create-training-log.dto';
 import { TrainingService } from '../services/training.service';
+import { ExerciseDto } from '../dtos/exercise.dto';
+import { JwtAuthGuard } from 'src/context/shared/guards/jwt-auth.guard';
+import { UserTypeGuard } from 'src/context/shared/guards/type-user.guard';
+import { UserTypes } from 'src/context/shared/decorators/type-user.decorator';
+import { UserType } from 'src/app/users/enums/user-type';
 
 @Controller('training')
 export class TrainingController {
@@ -15,6 +20,12 @@ export class TrainingController {
   getDoctorExercises() {
     return this.trainingService.getDoctorExercises();
   }
+
+  @Post('exercises') @UseGuards(JwtAuthGuard, UserTypeGuard) @UserTypes(UserType.DOCTOR)
+  createExercise(@Body() dto: ExerciseDto) { return this.trainingService.createExercise(dto); }
+
+  @Patch('exercises/:id') @UseGuards(JwtAuthGuard, UserTypeGuard) @UserTypes(UserType.DOCTOR)
+  updateExercise(@Param('id') id: string, @Body() dto: Partial<ExerciseDto>) { return this.trainingService.updateExercise(id, dto); }
 
   @Post('logs')
   createLog(@Body() dto: CreateTrainingLogDto) {

@@ -11,21 +11,27 @@ import { PatientService } from './services/patient.service';
 import { Doctor } from './entities/doctor.entity';
 import { FamilyMember } from './entities/family.entity';
 import { Patient } from './entities/patient.entity';
+import { Assignment } from './entities/assignment.entity';
+import { AssignmentController } from './api/assignment.controller';
+import { ProfileController } from './api/profile.controller';
+import { AssignmentService } from './services/assignment.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Doctor, FamilyMember, Patient])],
-  controllers: [FamilyMemberController, DoctorController, PatientController],
+  imports: [TypeOrmModule.forFeature([User, Doctor, FamilyMember, Patient, Assignment])],
+  controllers: [FamilyMemberController, DoctorController, PatientController, AssignmentController, ProfileController],
   providers: [
     UserBaseService,
     FamilyMemberService,
     DoctorService,
     PatientService,
+    AssignmentService,
   ],
   exports: [
     UserBaseService,
     FamilyMemberService,
     DoctorService,
     PatientService,
+    AssignmentService,
   ],
 })
 export class UsersModule {}

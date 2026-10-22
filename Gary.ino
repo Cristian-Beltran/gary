@@ -1,12 +1,20 @@
 #include <Wire.h>
 #include <math.h>
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include "MAX30105.h"
 #include "heartRate.h"
 #include "spo2_algorithm.h"
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include <WebSocketsClient.h>
+
+/*
+  Comunicacion remota deshabilitada temporalmente.
+  Para restaurarla, descomentar este bloque y las secciones Wi-Fi/MQTT
+  marcadas mas abajo.
+
+  #include <WiFi.h>
+  #include <PubSubClient.h>
+*/
 
 // ESP32 NodeMCU 40 pines
 constexpr uint8_t I2C_SDA_PIN = 21;
@@ -17,18 +25,31 @@ constexpr uint8_t RELAY_GREEN_PIN = 19;
 constexpr uint8_t LUNG_PRESSURE_PIN = 35;  // ADC solo entrada
 constexpr uint8_t AIR_FLOW_PIN = 34;       // ADC solo entrada
 
-// OLED 0.91" I2C
-constexpr uint8_t OLED_ADDRESS = 0x3C;  // 0x78 en 8 bits equivale a 0x3C en 7 bits
-constexpr uint8_t OLED_WIDTH = 128;
-constexpr uint8_t OLED_HEIGHT = 32;
-
-// Tiempo entre impresiones
-constexpr unsigned long SERIAL_INTERVAL_MS = 500;
+// Intervalos de actualizacion
+// Un reporte completo ocupa varias lineas; 3 s evita que el monitor se desplace demasiado rapido.
+constexpr unsigned long SERIAL_INTERVAL_MS = 3000;
+constexpr unsigned long RESULT_SIGNAL_TIME_MS = 5000;
 constexpr unsigned long MQTT_TELEMETRY_INTERVAL_MS = 500;
 constexpr unsigned long MQTT_STATUS_INTERVAL_MS = 5000;
-constexpr unsigned long OLED_INTERVAL_MS = 150;
-constexpr unsigned long RESULT_BLINK_MS = 180;
-constexpr unsigned long RESULT_SIGNAL_TIME_MS = 5000;
+
+// Configure these values for the Mosquitto/Tailscale server used by the web app.
+const char* WIFI_SSID = "REPLACE_WIFI_SSID";
+const char* WIFI_PASSWORD = "REPLACE_WIFI_PASSWORD";
+const char* MQTT_BROKER = "server-local.tail9af6ac.ts.net";
+const uint16_t MQTT_PORT = 443;
+const char* MQTT_WS_PATH = "/";
+const char* MQTT_USER = "device";
+const char* MQTT_PASSWORD = "esp32";
+const char* MQTT_TOPIC_TELEMETRY = "gary/device/esp32-01/telemetry";
+const char* MQTT_TOPIC_STATUS = "gary/device/esp32-01/status";
+const char* MQTT_TOPIC_COMMAND = "gary/device/esp32-01/cmd";
+const char* MQTT_TOPIC_ACK = "gary/device/esp32-01/cmd/ack";
+
+/*
+  Comunicacion remota deshabilitada temporalmente.
+  constexpr unsigned long MQTT_TELEMETRY_INTERVAL_MS = 500;
+  constexpr unsigned long MQTT_STATUS_INTERVAL_MS = 5000;
+*/
 
 // Parametros del MAX30102
 constexpr uint16_t MAX30102_BRIGHTNESS = 60;
@@ -83,17 +104,19 @@ constexpr int32_t EMERGENCY_SPO2_LOW = 90;
 constexpr float EMERGENCY_PRESSURE_HIGH_KPA = 4.5f;
 constexpr float EMERGENCY_AIR_FLOW_HIGH_SLM = 140.0f;
 
-// WiFi + MQTT (configuracion local)
-const char* WIFI_SSID = "Estudiantes";
-const char* WIFI_PASSWORD = "EstWifi.0224";
-//const char* WIFI_SSID = "Cordova hogar ext";
-//const char* WIFI_PASSWORD = "4ndiNicol3";
+/*
+  Comunicacion remota deshabilitada temporalmente.
+  const char* WIFI_SSID = "Estudiantes";
+  const char* WIFI_PASSWORD = "EstWifi.0224";
+  // const char* WIFI_SSID = "Cordova hogar ext";
+  // const char* WIFI_PASSWORD = "4ndiNicol3";
 
-const char* MQTT_BROKER = "broker.hivemq.com";
-const uint16_t MQTT_PORT = 1883;
-const char* MQTT_TOPIC_TELEMETRY = "gary/device/telemetry";
-const char* MQTT_TOPIC_STATUS = "gary/device/status";
-const char* MQTT_TOPIC_CONTROL = "gary/device/control";
+  const char* MQTT_BROKER = "broker.hivemq.com";
+  const uint16_t MQTT_PORT = 1883;
+  const char* MQTT_TOPIC_TELEMETRY = "gary/device/telemetry";
+  const char* MQTT_TOPIC_STATUS = "gary/device/status";
+  const char* MQTT_TOPIC_CONTROL = "gary/device/control";
+*/
 
 enum BreathingState : uint8_t {
   STATE_WAIT_FINGER = 0,
@@ -103,9 +126,36 @@ enum BreathingState : uint8_t {
 };
 
 MAX30105 particleSensor;
-Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
-WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
+constexpr size_t WS_RX_BUFFER_SIZE = 4096;
+class WebSocketClientBridge : public Client {
+ public:
+  void setWebSocket(WebSocketsClient* client) { ws = client; }
+  void setConnected(bool value) { connectedFlag = value; }
+  void addData(const uint8_t* data, size_t length) { for (size_t i = 0; i < length; ++i) { size_t next = (head + 1) % WS_RX_BUFFER_SIZE; if (next != tail) { buffer[head] = data[i]; head = next; } } }
+  int connect(const char*, uint16_t) override { return 1; }
+  int connect(IPAddress, uint16_t) override { return 1; }
+  size_t write(uint8_t value) override { return write(&value, 1); }
+  size_t write(const uint8_t* data, size_t length) override { if (!connectedFlag || !ws) return 0; ws->sendBIN(data, length); return length; }
+  int available() override { return head >= tail ? head - tail : WS_RX_BUFFER_SIZE - tail + head; }
+  int read() override { if (!available()) return -1; uint8_t value = buffer[tail]; tail = (tail + 1) % WS_RX_BUFFER_SIZE; return value; }
+  int read(uint8_t* data, size_t length) override { size_t count = 0; while (count < length && available()) data[count++] = read(); return count; }
+  int peek() override { return available() ? buffer[tail] : -1; }
+  void flush() override {}
+  void stop() override { connectedFlag = false; }
+  uint8_t connected() override { return connectedFlag; }
+  operator bool() override { return connectedFlag; }
+ private:
+  WebSocketsClient* ws = nullptr; uint8_t buffer[WS_RX_BUFFER_SIZE]{}; size_t head = 0; size_t tail = 0; bool connectedFlag = false;
+};
+WebSocketsClient webSocket;
+WebSocketClientBridge wsBridge;
+PubSubClient mqttClient(wsBridge);
+unsigned long lastMqttReconnectMs = 0;
+/*
+  Comunicacion remota deshabilitada temporalmente.
+  WiFiClient wifiClient;
+  PubSubClient mqttClient(wifiClient);
+*/
 
 float heartRateBpm = 0.0f;
 int32_t spo2 = 0;
@@ -132,11 +182,12 @@ bool pressureBaselineReady = false;
 uint32_t lastIrValue = 0;
 bool fingerDetected = false;
 bool max30102Available = false;
-bool displayAvailable = false;
 int32_t max30102SamplesStored = 0;
 int32_t max30102NewSamples = 0;
-bool monitoringEnabled = false;
 bool emergencyActive = false;
+bool monitoringEnabled = false;
+unsigned long lastMqttTelemetryMs = 0;
+unsigned long lastMqttStatusMs = 0;
 
 BreathingState breathingState = STATE_WAIT_FINGER;
 float samplePeakPressureKpa = 0.0f;
@@ -151,28 +202,28 @@ unsigned long resultStartMs = 0;
 uint32_t samplePoints = 0;
 
 unsigned long lastSerialPrintMs = 0;
-unsigned long lastDisplayUpdateMs = 0;
-unsigned long lastMqttTelemetryMs = 0;
-unsigned long lastMqttStatusMs = 0;
+
+/*
+  Comunicacion remota deshabilitada temporalmente.
+  unsigned long lastMqttTelemetryMs = 0;
+  unsigned long lastMqttStatusMs = 0;
+*/
 
 void initializeMax30102();
 void initializePressureSensor();
 void initializeAirFlowSensor();
-void initializeDisplay();
 void updatePressure();
 void updateAirFlow();
 void updateRespiratoryMetrics();
 void updateMax30102();
 void updateBreathingTest();
 void updateOutputs();
-void updateDisplay();
 void printTelemetry();
 float readPressureKpa();
 float readAirFlowSlm();
 const char* getPressureRangeLabel(float pressureKpa);
 const char* getSpo2StatusLabel();
 const char* getStateLabel();
-const char* getShortStateLabel();
 const char* getSampleQualityLabel(float pressureKpa);
 bool isEmergencyCondition();
 void startSample();
@@ -182,6 +233,15 @@ void ensureMqttConnection();
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void publishTelemetry();
 void publishDeviceStatus();
+void publishCommandAck(const String& commandId, bool accepted);
+/*
+  Comunicacion remota deshabilitada temporalmente.
+  void connectWifi();
+  void ensureMqttConnection();
+  void mqttCallback(char* topic, byte* payload, unsigned int length);
+  void publishTelemetry();
+  void publishDeviceStatus();
+*/
 
 void setup() {
   Serial.begin(115200);
@@ -195,14 +255,24 @@ void setup() {
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
   initializePressureSensor();
   initializeAirFlowSensor();
-  initializeDisplay();
   initializeMax30102();
 
   connectWifi();
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+  setupWebSocket();
   mqttClient.setCallback(mqttCallback);
 
-  Serial.println("Sistema Gary iniciado");
+  /*
+    Comunicacion remota deshabilitada temporalmente.
+    connectWifi();
+    mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
+    mqttClient.setCallback(mqttCallback);
+  */
+
+  Serial.println();
+  Serial.println("========================================");
+  Serial.println("  Sistema Gary - Monitor local iniciado");
+  Serial.println("  Salida: monitor serie a 115200 baudios");
+  Serial.println("========================================");
 }
 
 void loop() {
@@ -214,32 +284,50 @@ void loop() {
   emergencyActive = isEmergencyCondition();
   updateOutputs();
 
-  if (WiFi.status() != WL_CONNECTED) {
-    connectWifi();
-  }
+  if (WiFi.status() != WL_CONNECTED) connectWifi();
+  webSocket.loop();
   ensureMqttConnection();
   mqttClient.loop();
 
-  if (millis() - lastDisplayUpdateMs >= OLED_INTERVAL_MS) {
-    lastDisplayUpdateMs = millis();
-    updateDisplay();
-  }
+  /*
+    Comunicacion remota deshabilitada temporalmente.
+    if (WiFi.status() != WL_CONNECTED) {
+      connectWifi();
+    }
+    ensureMqttConnection();
+    mqttClient.loop();
+  */
 
   if (millis() - lastSerialPrintMs >= SERIAL_INTERVAL_MS) {
     lastSerialPrintMs = millis();
     printTelemetry();
   }
 
-  if (millis() - lastMqttTelemetryMs >= MQTT_TELEMETRY_INTERVAL_MS) {
+  if (monitoringEnabled && millis() - lastMqttTelemetryMs >= MQTT_TELEMETRY_INTERVAL_MS) {
     lastMqttTelemetryMs = millis();
     publishTelemetry();
   }
-
   if (millis() - lastMqttStatusMs >= MQTT_STATUS_INTERVAL_MS) {
     lastMqttStatusMs = millis();
     publishDeviceStatus();
   }
+
+  /*
+    Comunicacion remota deshabilitada temporalmente.
+    if (millis() - lastMqttTelemetryMs >= MQTT_TELEMETRY_INTERVAL_MS) {
+      lastMqttTelemetryMs = millis();
+      publishTelemetry();
+    }
+
+    if (millis() - lastMqttStatusMs >= MQTT_STATUS_INTERVAL_MS) {
+      lastMqttStatusMs = millis();
+      publishDeviceStatus();
+    }
+  */
 }
+
+/*
+  Comunicacion remota deshabilitada temporalmente.
 
 void connectWifi() {
   if (WiFi.status() == WL_CONNECTED) {
@@ -352,6 +440,82 @@ void publishDeviceStatus() {
   mqttClient.publish(MQTT_TOPIC_STATUS, payload.c_str(), true);
 }
 
+*/
+
+void connectWifi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  if (type == WStype_CONNECTED) { wsBridge.setConnected(true); Serial.println("WSS conectado"); }
+  else if (type == WStype_DISCONNECTED) { wsBridge.setConnected(false); if (mqttClient.connected()) mqttClient.disconnect(); }
+  else if (type == WStype_BIN) wsBridge.addData(payload, length);
+}
+
+void setupWebSocket() {
+  wsBridge.setWebSocket(&webSocket);
+  webSocket.beginSSL(MQTT_BROKER, MQTT_PORT, MQTT_WS_PATH, nullptr, "mqtt");
+  webSocket.onEvent(webSocketEvent);
+  webSocket.setReconnectInterval(5000);
+  mqttClient.setBufferSize(2048);
+  mqttClient.setKeepAlive(30);
+  mqttClient.setCallback(mqttCallback);
+}
+
+void ensureMqttConnection() {
+  if (mqttClient.connected() || WiFi.status() != WL_CONNECTED || !wsBridge.connected()) return;
+  if (millis() - lastMqttReconnectMs < 5000) return;
+  lastMqttReconnectMs = millis();
+  String clientId = "gary-esp32-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  String willPayload = "{\"online\":false,\"mqttConnected\":false,\"wifiConnected\":false}";
+  if (mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, MQTT_TOPIC_STATUS, 1, true, willPayload.c_str())) {
+    mqttClient.subscribe(MQTT_TOPIC_COMMAND, 1);
+    publishDeviceStatus();
+  }
+}
+
+void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  if (strcmp(topic, MQTT_TOPIC_COMMAND) != 0) return;
+  String message;
+  for (unsigned int i = 0; i < length; ++i) message += static_cast<char>(payload[i]);
+  bool start = message.indexOf("START_MEASUREMENT") >= 0;
+  bool stop = message.indexOf("STOP_MEASUREMENT") >= 0;
+  String commandId = "";
+  int idAt = message.indexOf("\"commandId\":\"");
+  if (idAt >= 0) { idAt += 13; int end = message.indexOf('"', idAt); if (end > idAt) commandId = message.substring(idAt, end); }
+  if (start) monitoringEnabled = true;
+  if (stop) monitoringEnabled = false;
+  publishCommandAck(commandId, start || stop);
+  publishDeviceStatus();
+}
+
+void publishCommandAck(const String& commandId, bool accepted) {
+  if (!mqttClient.connected()) return;
+  String payload = "{\"commandId\":\"" + commandId + "\",\"accepted\":" + String(accepted ? "true" : "false") + ",\"monitoringEnabled\":" + String(monitoringEnabled ? "true" : "false") + ",\"timestamp\":" + String(millis()) + "}";
+  mqttClient.publish(MQTT_TOPIC_ACK, payload.c_str(), false);
+}
+
+void publishTelemetry() {
+  if (!mqttClient.connected()) return;
+  String payload = "{";
+  payload += "\"pulse\":" + String(validHeartRate ? int(heartRateBpm + 0.5f) : 0) + ",";
+  payload += "\"oxygenSaturation\":" + String(validSpO2 ? int(spo2Filtered + 0.5f) : 0) + ",";
+  payload += "\"lungCapacity\":" + String(lungPressureKpa, 3) + ",\"airFlow\":" + String(airFlowSlm, 2) + ",";
+  payload += "\"peakExpiratoryFlow\":" + String(peakExpiratoryFlowSlm, 2) + ",\"respiratoryRate\":" + String(respiratoryRateBpm, 2) + ",";
+  payload += "\"expiratoryVolume\":" + String(expiratoryVolumeLiters, 3) + ",\"state\":\"" + String(getStateLabel()) + "\",\"timestamp\":" + String(millis()) + "}";
+  mqttClient.publish(MQTT_TOPIC_TELEMETRY, payload.c_str(), false);
+}
+
+void publishDeviceStatus() {
+  if (!mqttClient.connected()) return;
+  String payload = "{\"online\":true,\"mqttConnected\":true,\"wifiConnected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
+  payload += "\"monitoringEnabled\":" + String(monitoringEnabled ? "true" : "false") + ",\"emergencyActive\":" + String(emergencyActive ? "true" : "false") + ",";
+  payload += "\"rssi\":" + String(WiFi.RSSI()) + ",\"timestamp\":" + String(millis()) + "}";
+  mqttClient.publish(MQTT_TOPIC_STATUS, payload.c_str(), true);
+}
+
 void initializePressureSensor() {
   analogReadResolution(12);
   analogSetPinAttenuation(LUNG_PRESSURE_PIN, ADC_11db);
@@ -360,21 +524,6 @@ void initializePressureSensor() {
 void initializeAirFlowSensor() {
   analogReadResolution(12);
   analogSetPinAttenuation(AIR_FLOW_PIN, ADC_11db);
-}
-
-void initializeDisplay() {
-  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
-    Serial.println("No se detecto la OLED.");
-    return;
-  }
-
-  displayAvailable = true;
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("Iniciando...");
-  display.display();
 }
 
 void initializeMax30102() {
@@ -664,7 +813,7 @@ void updateBreathingTest() {
 
 void updateOutputs() {
   bool redOn = emergencyActive;
-  bool greenOn = mqttClient.connected() && monitoringEnabled;
+  bool greenOn = fingerDetected && breathingState == STATE_READY_TO_TEST;
   bool vibratorOn = emergencyActive;
 
   digitalWrite(RELAY_RED_PIN, redOn ? HIGH : LOW);
@@ -672,118 +821,104 @@ void updateOutputs() {
   digitalWrite(VIBRATOR_PIN, vibratorOn ? HIGH : LOW);
 }
 
-void updateDisplay() {
-  if (!displayAvailable) {
-    return;
-  }
-
-  display.clearDisplay();
-  display.setTextSize(1);
-  display.setTextWrap(false);
-  display.setCursor(0, 0);
-
-  display.print("P:");
-  if (validHeartRate && heartRateBpm > 0.0f) {
-    display.print(heartRateBpm, 0);
-  } else {
-    display.print("--");
-  }
-  display.print(" S:");
-  if (validSpO2 && spo2 > 0) {
-    display.print(static_cast<int32_t>(spo2Filtered + 0.5f));
-    display.print('%');
-  } else {
-    display.print("--");
-  }
-  display.println();
-
-  display.print("Pr:");
-  display.print(lungPressureKpa, 2);
-  display.println("kPa");
-
-  display.print("Fl:");
-  display.print(airFlowSlm, 1);
-  display.println(" SLM");
-
-  if (emergencyActive) {
-    display.println("ALERTA CLINICA");
-  } else if (mqttClient.connected() && monitoringEnabled) {
-    display.println("MONITOREO ON");
-  } else if (!mqttClient.connected()) {
-    display.println("MQTT OFF");
-  } else {
-    display.println(getShortStateLabel());
-  }
-
-  display.display();
-}
-
 void printTelemetry() {
+  Serial.println();
+  Serial.println("----------------------------------------");
+  Serial.print("Tiempo de ejecucion: ");
+  Serial.print(millis() / 1000.0f, 1);
+  Serial.println(" s");
+
+  Serial.println("[SISTEMA]");
   Serial.print("Estado: ");
   Serial.println(getStateLabel());
+  Serial.print("MAX30102: ");
+  Serial.println(max30102Available ? "DISPONIBLE" : "NO DETECTADO");
+  Serial.print("Dedo: ");
+  Serial.println(fingerDetected ? "DETECTADO" : "NO DETECTADO");
+  Serial.print("IR actual: ");
+  Serial.println(lastIrValue);
+  Serial.print("Muestras MAX30102 en buffer: ");
+  Serial.println(max30102SamplesStored);
 
+  Serial.println("[SIGNOS VITALES]");
   Serial.print("Pulso: ");
   if (validHeartRate && heartRateBpm > 0.0f) {
     Serial.print(heartRateBpm, 1);
     Serial.println(" bpm");
   } else {
-    Serial.println("Sin lectura");
+    Serial.println("SIN LECTURA VALIDA");
   }
 
   Serial.print("SpO2: ");
-  if (validSpO2 && spo2 > 0) {
+  if (validSpO2 && spo2Filtered > 0.0f) {
     Serial.print(static_cast<int32_t>(spo2Filtered + 0.5f));
     Serial.print(" % (");
     Serial.print(getSpo2StatusLabel());
     Serial.println(")");
   } else {
-    Serial.println("Sin lectura");
+    Serial.println("SIN LECTURA VALIDA");
   }
 
-  Serial.print("Respiracion actual: ");
-  Serial.print(lungPressureKpa, 2);
-  Serial.print(" kPa | Rango: ");
+  Serial.println("[RESPIRACION]");
+  Serial.print("Presion cruda: ");
+  Serial.print(lungPressureRawKpa, 3);
+  Serial.println(" kPa");
+  Serial.print("Linea base de presion: ");
+  Serial.print(lungPressureBaselineKpa, 3);
+  Serial.println(" kPa");
+  Serial.print("Presion corregida: ");
+  Serial.print(lungPressureKpa, 3);
+  Serial.print(" kPa (");
   Serial.println(getPressureRangeLabel(lungPressureKpa));
 
-  Serial.print("Flujo de aire: ");
+  Serial.print("Flujo crudo: ");
+  Serial.print(airFlowRawSlm, 2);
+  Serial.println(" SLM");
+  Serial.print("Flujo filtrado: ");
   Serial.print(airFlowSlm, 2);
   Serial.println(" SLM");
-
-  Serial.print("Flujo pico espiratorio: ");
+  Serial.print("Exhalacion en curso: ");
+  Serial.println(exhalationActive ? "SI" : "NO");
+  Serial.print("Flujo pico espiratorio (PEF): ");
   Serial.print(peakExpiratoryFlowSlm, 2);
   Serial.println(" SLM");
-
   Serial.print("Frecuencia respiratoria: ");
   Serial.print(respiratoryRateBpm, 2);
   Serial.println(" rpm");
-
   Serial.print("Volumen espiratorio: ");
   Serial.print(expiratoryVolumeLiters, 3);
   Serial.println(" L");
 
-  Serial.print("Base respiracion: ");
-  Serial.print(lungPressureBaselineKpa, 2);
-  Serial.println(" kPa");
-
-  Serial.print("Monitoreo remoto: ");
-  Serial.println(monitoringEnabled ? "ACTIVO" : "INACTIVO");
-
+  Serial.println("[SEGURIDAD Y SALIDAS]");
   Serial.print("Emergencia: ");
-  Serial.println(emergencyActive ? "SI" : "NO");
+  Serial.println(emergencyActive ? "ACTIVA" : "NO ACTIVA");
+  Serial.print("Rele rojo / vibrador: ");
+  Serial.println(emergencyActive ? "ENCENDIDOS" : "APAGADOS");
+  Serial.print("Rele verde (listo para medir): ");
+  Serial.println(fingerDetected && breathingState == STATE_READY_TO_TEST ? "ENCENDIDO" : "APAGADO");
 
-  if (breathingState == STATE_RESULT) {
-    Serial.print("Muestra final -> Resultado: ");
+  Serial.println("[MUESTRA RESPIRATORIA]");
+  if (breathingState == STATE_SAMPLING) {
+    Serial.print("Muestra en curso - Pico: ");
+    Serial.print(samplePeakPressureKpa, 3);
+    Serial.print(" kPa | Duracion: ");
+    Serial.print(sampleDurationMs / 1000.0f, 1);
+    Serial.println(" s");
+  } else if (lastSampleDurationMs > 0) {
+    Serial.print("Ultimo resultado: ");
     Serial.print(getSampleQualityLabel(lastSamplePeakPressureKpa));
     Serial.print(" | Fuerza: ");
     Serial.print(getPressureRangeLabel(lastSamplePeakPressureKpa));
     Serial.print(" | Pico: ");
-    Serial.print(lastSamplePeakPressureKpa, 2);
-    Serial.print(" kPa | Tiempo: ");
+    Serial.print(lastSamplePeakPressureKpa, 3);
+    Serial.print(" kPa | Promedio: ");
+    Serial.print(lastSampleAveragePressureKpa, 3);
+    Serial.print(" kPa | Duracion: ");
     Serial.print(lastSampleDurationMs / 1000.0f, 1);
     Serial.println(" s");
+  } else {
+    Serial.println("Aun no hay una muestra finalizada.");
   }
-
-  Serial.println();
 }
 
 float readPressureKpa() {
@@ -860,21 +995,6 @@ const char* getStateLabel() {
       return "TOMANDO MUESTRA";
     case STATE_RESULT:
       return "MUESTRA TERMINADA";
-    default:
-      return "DESCONOCIDO";
-  }
-}
-
-const char* getShortStateLabel() {
-  switch (breathingState) {
-    case STATE_WAIT_FINGER:
-      return "ESPERA DEDO";
-    case STATE_READY_TO_TEST:
-      return "LISTO";
-    case STATE_SAMPLING:
-      return "MUESTRA";
-    case STATE_RESULT:
-      return "RESULTADO";
     default:
       return "DESCONOCIDO";
   }

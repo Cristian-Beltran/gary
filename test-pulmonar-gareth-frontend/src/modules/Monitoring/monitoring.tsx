@@ -29,8 +29,12 @@ import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Check, Activity, Droplets, Wind, Gauge, Waves, Video } from "lucide-react";
 import { useAuthStore } from "@/auth/useAuth";
 
-const MQTT_BROKER_URL = "ws://broker.hivemq.com:8000/mqtt";
-const MQTT_TOPIC = "gary/device/telemetry";
+const MQTT_BROKER_URL = import.meta.env.VITE_MQTT_WS_URL ?? "ws://localhost:9001/mqtt";
+const MQTT_USER = import.meta.env.VITE_MQTT_USER ?? "";
+const MQTT_PASSWORD = import.meta.env.VITE_MQTT_PASSWORD ?? "";
+const MQTT_ROOT = import.meta.env.VITE_MQTT_TOPIC_ROOT ?? "gary";
+const MQTT_DEVICE_ID = import.meta.env.VITE_MQTT_DEVICE_ID ?? "esp32-01";
+const MQTT_TOPIC = `${MQTT_ROOT}/device/${MQTT_DEVICE_ID}/telemetry`;
 
 type RealtimeRow = {
   timestamp: string;
@@ -119,9 +123,12 @@ export default function MonitoringPage() {
   const { user } = useAuthStore();
   const [patients, setPatients] = useState<Patient[]>([]);
   const [patientId, setPatientId] = useState("");
+  const [exerciseId, setExerciseId] = useState("");
+  const [patientExercises, setPatientExercises] = useState<TrainingExercise[]>([]);
   const [session, setSession] = useState<Session | null>(null);
   const [mqttConnected, setMqttConnected] = useState(false);
   const [realtime, setRealtime] = useState<RealtimeRow[]>([]);
+  const [telemetryFresh, setTelemetryFresh] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [doctorExercises, setDoctorExercises] = useState<TrainingExercise[]>([]);
@@ -134,11 +141,15 @@ export default function MonitoringPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [patientsData, activeSession] = await Promise.all([
-          patientService.findAll(),
-          sessionService.getActive(),
-        ]);
-        setPatients(patientsData ?? []);
+        const activeSession = await sessionService.getActive();
+        if (user?.type === "patient") {
+          const ownPatient = await patientService.me();
+          setPatients([ownPatient]);
+          setPatientId(ownPatient.id);
+        } else {
+          const patientsData = await patientService.findAll();
+          setPatients(patientsData ?? []);
+        }
         setSession(activeSession);
         if (activeSession?.patient?.id) {
           setPatientId(activeSession.patient.id);
@@ -149,7 +160,12 @@ export default function MonitoringPage() {
         setError(message);
       }
     })();
-  }, []);
+  }, [user?.type]);
+
+  useEffect(() => {
+    if (user?.type !== "patient") return;
+    trainingService.getPatientExercises().then(setPatientExercises).catch(() => setPatientExercises([]));
+  }, [user?.type]);
 
   useEffect(() => {
     if (user?.type === "patient") return;
@@ -236,6 +252,7 @@ export default function MonitoringPage() {
       reconnectPeriod: 3000,
       clean: true,
       clientId: `gary-frontend-${Math.random().toString(16).slice(2, 10)}`,
+      ...(MQTT_USER ? { username: MQTT_USER, password: MQTT_PASSWORD } : {}),
     });
 
     clientRef.current = client;
@@ -254,6 +271,7 @@ export default function MonitoringPage() {
       if (!reading) {
         return;
       }
+      setTelemetryFresh(true);
       setRealtime((prev) => [...prev, reading].slice(-200));
     });
 
@@ -263,6 +281,17 @@ export default function MonitoringPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const lastReading = realtime.at(-1);
+      if (!lastReading) return setTelemetryFresh(false);
+      const parsed = Number(lastReading.timestamp);
+      const receivedAt = Number.isFinite(parsed) ? parsed : new Date(lastReading.timestamp).getTime();
+      setTelemetryFresh(Number.isFinite(receivedAt) && Date.now() - receivedAt <= 10_000);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [realtime]);
+
   const handleCreateSession = async () => {
     if (!patientId || session) {
       return;
@@ -271,7 +300,7 @@ export default function MonitoringPage() {
     setLoading(true);
     setError(null);
     try {
-      const created = await sessionService.create({ patientId });
+      const created = await sessionService.create({ patientId, ...(exerciseId ? { exerciseId } : {}) });
       setSession(created);
     } catch (e: unknown) {
       const message =
@@ -307,8 +336,8 @@ export default function MonitoringPage() {
   };
 
   const last = realtime.at(-1);
-  const canCreate = !!patientId && !session && !loading;
-  const canClose = !!session && !loading;
+  const canCreate = user?.type === "patient" && !!patientId && !session && !loading;
+  const canClose = user?.type === "patient" && !!session && !loading;
 
   const chartData = useMemo(
     () =>
@@ -330,13 +359,14 @@ export default function MonitoringPage() {
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-2xl font-bold">Terapia Respiratoria</h2>
-          <p className="text-muted-foreground">
-            Monitoreo en vivo por MQTT y guardado en backend cada 1 minuto
-          </p>
+          <p className="text-muted-foreground">Monitoreo en vivo por MQTT y guardado seguro en la sesión activa.</p>
         </div>
         <div className="flex gap-2">
           <Badge variant={mqttConnected ? "default" : "secondary"}>
             MQTT {mqttConnected ? "conectado" : "desconectado"}
+          </Badge>
+          <Badge variant={telemetryFresh ? "default" : "destructive"}>
+            {telemetryFresh ? "Datos actuales" : "Sin datos actuales"}
           </Badge>
           <Badge variant={session ? "default" : "outline"}>
             {session ? "Sesion activa" : "Sin sesion activa"}
@@ -355,9 +385,11 @@ export default function MonitoringPage() {
 
       <Card className={session ? "border-amber-500/50" : ""}>
         <CardHeader>
-          <CardTitle>Sesion de terapia global</CardTitle>
+          <CardTitle>Sesión de terapia</CardTitle>
           <CardDescription>
-            Solo puede existir una sesion activa para todo el sistema.
+            {user?.type === "patient"
+              ? "Inicia y finaliza tu propia sesión de medición."
+              : "Consulta en vivo la sesión activa del paciente autorizado."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -367,9 +399,7 @@ export default function MonitoringPage() {
                 <AlertTriangle className="h-4 w-4" />
                 Ya existe una sesion activa
               </div>
-              <div className="mt-1 text-muted-foreground">
-                Paciente ID: {session.patient.id} · Inicio: {fmtTime(session.startedAt)}
-              </div>
+              <div className="mt-1 text-muted-foreground">Paciente ID: {session.patient.id} · Inicio: {fmtTime(session.startedAt)}{session.exercise ? ` · Ejercicio: ${session.exercise.title}` : ""}</div>
             </div>
           ) : (
             <div className="rounded-md border border-green-500/40 bg-green-50/40 p-3 text-sm">
@@ -380,7 +410,7 @@ export default function MonitoringPage() {
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+          <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto_auto]">
             <select
               className="w-full rounded-md border px-3 py-2 bg-background"
               value={patientId}
@@ -392,6 +422,17 @@ export default function MonitoringPage() {
                 <option key={p.id} value={p.id}>
                   {p.user.fullname}
                 </option>
+              ))}
+            </select>
+            <select
+              className="w-full rounded-md border px-3 py-2 bg-background"
+              value={exerciseId}
+              onChange={(e) => setExerciseId(e.target.value)}
+              disabled={!!session || loading || user?.type !== "patient"}
+            >
+              <option value="">- Medición libre -</option>
+              {patientExercises.map((exercise) => (
+                <option key={exercise.id} value={exercise.id}>{exercise.title} · {exercise.level}</option>
               ))}
             </select>
             <Button onClick={handleCreateSession} disabled={!canCreate}>

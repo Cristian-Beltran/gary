@@ -10,9 +10,11 @@ import { MqttTelemetryService } from './services/mqtt-telemetry.service';
 import { TelemetryAnalysisService } from './services/telemetry-analysis.service';
 import { SessionReportService } from './services/session-report.service';
 import { SessionController } from './api/session.controller';
+import { UsersModule } from '../users/user.module';
+import { Exercise } from '../training/entities/exercise.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Session, SessionData, Patient]), PdfModule],
+  imports: [TypeOrmModule.forFeature([Session, SessionData, Patient, Exercise]), PdfModule, UsersModule],
   providers: [SessionService, MqttTelemetryService, TelemetryAnalysisService, SessionReportService],
   controllers: [SessionController],
   exports: [SessionService],

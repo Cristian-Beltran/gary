@@ -33,15 +33,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose }) => {
 
   const navigationItems = [
     { name: "Dashboard", href: "/", icon: Home, show: true },
+    { name: "Mi perfil", href: "/profile", icon: User, show: true },
+    { name: "Mis doctores", href: "/my-doctors", icon: UsersRound, show: isPatient },
     { name: "Doctores", href: "/doctor", icon: UsersRound, show: isDoctor },
     {
       name: "Pacientes",
-      href: "/patients",
+      href: "/my-patients",
       icon: User,
-      show: isDoctor,
+      show: true,
     },
+    { name: "Ejercicios", href: "/exercise-admin", icon: Dumbbell, show: isDoctor },
     {
-      name: "Datos en tiempo real",
+      name: "Mediciones en tiempo real",
       href: "/monitoring",
       icon: Wifi,
       show: isDoctor,

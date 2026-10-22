@@ -1,5 +1,5 @@
 // src/features/auth/auth.store.ts
-import type { LoginDto, Profile, UserType } from "./auth.interface";
+import type { LoginDto, Profile, RegisterDto, UserType } from "./auth.interface";
 import Cookies from "js-cookie";
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -13,6 +13,7 @@ interface AuthState {
   version: boolean;
   // Login flows
   login: (credentials: LoginDto) => Promise<void>;
+  register: (credentials: RegisterDto) => Promise<void>;
   verifyToken: () => Promise<void>;
   logout: () => void;
   loadFromStorage: () => void;
@@ -55,10 +56,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
     } catch (err) {
       set({ isLoading: false });
-      toast.error("Correo o contraseña incorrectos", {
+      toast.error("CI, contraseña o rol incorrectos", {
         position: "top-center",
       });
       throw err;
+    }
+  },
+
+  register: async (credentials) => {
+    set({ isLoading: true });
+    try {
+      const { access_token, user } = await authService.register(credentials);
+      Cookies.set("auth_token", access_token, { expires: 3 });
+      Cookies.set("auth_type", user.type);
+      Cookies.set("auth_user", JSON.stringify(user));
+      set({ user, token: access_token, type: user.type, isLoading: false, version: true });
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
     }
   },
 

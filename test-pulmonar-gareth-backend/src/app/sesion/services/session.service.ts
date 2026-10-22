@@ -7,6 +7,7 @@ import { SessionData } from '../entities/session-data.entity';
 import { Patient } from '../../users/entities/patient.entity';
 import { CreateSessionDto } from '../dtos/create-session.dto';
 import { CreateSessionDataDto } from '../dtos/create-session-data.dto';
+import { Exercise } from '../../training/entities/exercise.entity';
 
 @Injectable()
 export class SessionService {
@@ -17,13 +18,15 @@ export class SessionService {
     private readonly dataRepo: Repository<SessionData>,
     @InjectRepository(Patient)
     private readonly patientRepo: Repository<Patient>,
+    @InjectRepository(Exercise)
+    private readonly exerciseRepo: Repository<Exercise>,
   ) {}
 
   /**
    * Crea una sesión para un paciente.
    * startedAt se setea por @CreateDateColumn en la entidad.
    */
-  async createSession(dto: CreateSessionDto): Promise<Session> {
+  async createSession(dto: CreateSessionDto, ownerUserId?: string): Promise<Session> {
     const activeSession = await this.getActiveSession();
     if (activeSession) {
       throw new ConflictException('Ya existe una sesion activa global');
@@ -35,8 +38,18 @@ export class SessionService {
     if (!patient) {
       throw new NotFoundException('Patient not found');
     }
+    if (ownerUserId && patient.user?.id !== ownerUserId) {
+      const ownedPatient = await this.patientRepo.findOne({ where: { id: dto.patientId }, relations: ['user'] });
+      if (!ownedPatient || ownedPatient.user.id !== ownerUserId) {
+        throw new ConflictException('Solo el paciente puede iniciar su propia medición');
+      }
+    }
 
-    const session = this.sessionRepo.create({ patient });
+    const exercise = dto.exerciseId
+      ? await this.exerciseRepo.findOne({ where: { id: dto.exerciseId, active: true } })
+      : undefined;
+    if (dto.exerciseId && !exercise) throw new NotFoundException('Exercise not found');
+    const session = this.sessionRepo.create({ patient, exercise, status: 'active' });
     return this.sessionRepo.save(session);
   }
 
@@ -80,13 +93,15 @@ export class SessionService {
       return session; // ya estaba cerrada; comportamiento idempotente
     }
     session.endedAt = new Date();
+    session.status = 'completed';
+    session.durationSeconds = Math.max(0, Math.round((session.endedAt.getTime() - session.startedAt.getTime()) / 1000));
     return this.sessionRepo.save(session);
   }
 
   async getActiveSession(): Promise<Session | null> {
     return this.sessionRepo.findOne({
       where: { endedAt: IsNull() },
-      relations: ['patient'],
+      relations: ['patient', 'exercise'],
       order: { startedAt: 'DESC' },
     });
   }
@@ -99,7 +114,7 @@ export class SessionService {
 
     const sessions = await this.sessionRepo.find({
       where: { patient: { id: patientId } },
-      relations: ['records', 'patient'],
+      relations: ['records', 'patient', 'exercise'],
       order: {
         startedAt: 'DESC',
         records: { recordedAt: 'ASC' },
@@ -112,7 +127,7 @@ export class SessionService {
   async findOneDetailed(sessionId: string): Promise<Session> {
     const session = await this.sessionRepo.findOne({
       where: { id: sessionId },
-      relations: ['records', 'patient', 'patient.user'],
+      relations: ['records', 'patient', 'patient.user', 'exercise'],
       order: {
         records: { recordedAt: 'ASC' },
       },
@@ -127,7 +142,7 @@ export class SessionService {
 
   async getAll(): Promise<Session[]> {
     const sessions = await this.sessionRepo.find({
-      relations: ['records', 'patient'],
+      relations: ['records', 'patient', 'exercise'],
       order: {
         startedAt: 'DESC',
         records: { recordedAt: 'ASC' },

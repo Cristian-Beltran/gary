@@ -15,6 +15,10 @@ import { PatientService } from '../services/patient.service';
 import { CreatePatientDto } from '../dtos/patient.dto';
 import { JwtAuthGuard } from 'src/context/shared/guards/jwt-auth.guard';
 import { Status } from 'src/context/shared/models/active.model';
+import { UserPayload } from 'src/context/shared/decorators/user.decorator';
+import { PayloadToken } from 'src/context/shared/models/token.model';
+import { UserType } from '../enums/user-type';
+import { ForbiddenException } from '@nestjs/common';
 
 @UseGuards(JwtAuthGuard)
 @Controller('patients')
@@ -27,8 +31,19 @@ export class PatientController {
   }
 
   @Get()
-  findAll() {
+  findAll(@UserPayload() user: PayloadToken) {
+    if (user.type !== UserType.DOCTOR) {
+      throw new ForbiddenException('Solo los doctores pueden consultar el listado de pacientes');
+    }
     return this.patientService.findAll();
+  }
+
+  @Get('me')
+  getMyPatientProfile(@UserPayload() user: PayloadToken) {
+    if (user.type !== UserType.PATIENT) {
+      throw new ForbiddenException('Esta cuenta no corresponde a un paciente');
+    }
+    return this.patientService.findOne(user.sub);
   }
 
   @Get(':id')

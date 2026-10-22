@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[context.production.environment]
+  VITE_API_URL = "https://server-local.tail9af6ac.ts.net/gary"
+  VITE_MQTT_WS_URL = "wss://server-local.tail9af6ac.ts.net"
+  VITE_MQTT_TOPIC_ROOT = "gary"
+  VITE_MQTT_DEVICE_ID = "esp32-01"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

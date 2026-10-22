@@ -12,6 +12,10 @@ export const patientService = {
     const res = await axios.get(BASE_URL);
     return res.data;
   },
+  me: async (): Promise<Patient> => {
+    const { data } = await axios.get("/patients/me");
+    return data;
+  },
 
   findOne: async (id: string): Promise<Patient> => {
     const res = await axios.get(`${BASE_URL}/${id}`);
