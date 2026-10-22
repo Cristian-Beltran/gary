@@ -16,7 +16,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document);
   app.enableCors({
-    origin: ['http://localhost:5173'],
+    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:5173,https://gary-project.netlify.app')
+      .split(',').map((origin) => origin.trim()),
     credentials: true,
   });
   app.useGlobalPipes(
@@ -31,6 +32,6 @@ async function bootstrap() {
   );
 
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
-  await app.listen(3000);
+  await app.listen(Number(process.env.PORT ?? 3000));
 }
 bootstrap();
